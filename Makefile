@@ -14,3 +14,17 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Makefile pour la parallélisation de Floyd
+
+CC      = mpicxx
+CFLAGS  = -O3 -Wall -Wextra -Ilibm
+TARGET  = floyd
+
+all: $(TARGET)
+
+$(TARGET): floyd.cpp
+	$(CC) $(CFLAGS) -o $@ $<
+
+clean:
+	rm -f $(TARGET) *.o

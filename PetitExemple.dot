@@ -1,0 +1,52 @@
+graph graphe_pondere {
+    node [shape=circle, style=filled, color=lightyellow, fontcolor=black];
+    edge [color=black, fontcolor=blue];
+
+    A1 [label="A"];
+    A2 [label="B"];
+    A3 [label="C"];
+    A4 [label="D"];
+    A5 [label="E"];
+    A6 [label="F"];
+    A7 [label="G"];
+    A8 [label="H"];
+    A9 [label="I"];
+    A10 [label="J"];
+    A11 [label="K"];
+    A12 [label="L"];
+    A13 [label="M"];
+    A14 [label="N"];
+    A15 [label="O"];
+    A16 [label="P"];   
+    A17 [label="Q"];
+    A18 [label="R"];
+    A19 [label="S"];
+    A20 [label="T"];      
+
+    // Les arêtes avec poids
+    A1 -- A2 [label="1", weight=1];
+    A3 -- A2 [label="2", weight=2];
+    A12 -- A4 [label="2", weight=3];
+    A9 -- A7 [label="4", weight=4];
+    A10 -- A7 [label="3", weight=3];
+    A5 -- A6 [label="7", weight=7];
+    A8 -- A6 [label="1", weight=1];
+    A7 -- A4 [label="8", weight=8];
+    A11 -- A3 [label="3", weight=3];
+    A5 -- A4 [label="4", weight=4];
+    A11 -- A8 [label="3", weight=3];
+    A1 -- A20 [label="1", weight=1];
+    A3 -- A16 [label="2", weight=2];
+    A12 -- A18 [label="2", weight=3];
+    A9 -- A14 [label="4", weight=4];
+    A10 -- A18 [label="3", weight=3];
+    A5 -- A13 [label="7", weight=7];
+    A8 -- A15 [label="1", weight=1];
+    A7 -- A17 [label="8", weight=8];
+    A11 -- A19 [label="3", weight=3];
+    A5 -- A20 [label="4", weight=4];
+    A11 -- A19 [label="3", weight=3];
+    
+    
+    
+}

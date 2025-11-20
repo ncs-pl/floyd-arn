@@ -18,136 +18,439 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include <algorithm>
-#include <iostream>
-#include <map>
-#include <vector>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <stdexcept>
-#include <cmath>
+/**
+ * @file floyd_mpi.c
+ * @brief Parallélisation de l'algorithme de Floyd-Warshall par blocs avec MPI.
+ *
+ * Hypothèses :
+ * - n est divisible par b
+ * - nprocs = (n / b) * (n / b) et est un carré parfait
+ *
+ * Usage :
+ *   mpirun -np P ./floyd_mpi n b input.txt output.txt
+ *
+ * input.txt :
+ *   n
+ *   n lignes de n entiers (matrice d'adjacence / distances)
+ */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 #include <mpi.h>
-#include <graphviz/cgraph.h>
 
+#define INF 1000000000
 
-/// @brief Lecture du graphe avec GraphViz et génération de la matrice d'adjacence adaptée.
-/// @param filename Le nom du fichier contenant le graphe.
-/// @return std::tuple<std::vector<int>, std::map<std::string, int>, int> La matrice d'adjacence non adaptée, les sommets du graphe, et le nombre de sommets.
-std::tuple<std::vector<int>, std::map<std::string, int>, int>
-ReadGraph(std::string_view filename)
-{
-  // TODO: use C++'s file system feature
-  FILE *file = fopen(filename.data(), "r");
-  if (!file) throw std::runtime_error("Erreur d’ouverture du fichier .dot");
-    
-  Agraph_t *graph = agread(file, nullptr);
-  fclose(file);
-  if (!graph) throw std::runtime_error("Erreur de lecture GraphViz");
-  
-  int nodes_count = agnnodes(graph);
-  std::map<std::string, int> nodes;
-  nodes.reserve(static_cast<std::size_t>(nb_nodes));
-    
-  int i = 0;
-  for (Agnode_t* node = agfstnode(graph); node; node = agnxtnode(graph, node)) nodes.emplace(agnameof(n), i++);
-  
-  std::vector<int> adjacency_matrix(nodes_count * nodes_count, 0);
-    
-  for (Agnode_t* node = agfstnode(graph); node; node = agnxtnode(graph, node)) {
-    int const i = nodes.at(agnameof(node));
-    for (Agedge_t* edge = agfstout(graph, node); edge; edge = agnxtout(graph, edge)) {
-      int const j = nodes.at(agnameof(aghead(edge)));
-      char* const w = agget(edge, (char*)"weight");
-      int const weight = w ? std::stoi(w) : 1;
-      adjacency_matrix[i * nb_nodes + j] = weight;
-      adjacency_matrix[j * nb_nodes + i] = weight;
+/**
+ * @brief Alloue un tableau d'entiers de taille n.
+ */
+static int *alloc_int_array(int n) {
+    int *ptr = (int *)malloc(n * sizeof(int));
+    if (!ptr) {
+        fprintf(stderr, "Erreur d'allocation mémoire\n");
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
-  }
-    
-  agclose(graph);
-  return std::make_tuple(std::move(adjacency_matrix), std::move(nodes), nodes_count);
+    return ptr;
 }
 
-int
-main(int argc, char* argv)
-{
-  MPI_Init(&argc, &argv);
-  
-  int rank;
-  int processors_count;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &processors_count);
-  
-  if (argc < 3)
-  {
-    std::cout << "Usage: " << argv[0] << "<file> <root>" << std::endl;
+/**
+ * @brief Lit une matrice n x n depuis un fichier (sur le rang 0 uniquement).
+ *
+ * @param filename Nom du fichier
+ * @param n        Taille de la matrice
+ * @return int*    Pointeur vers la matrice allouée (taille n*n)
+ */
+static int *read_full_matrix(const char *filename, int n, int rank) {
+    if (rank != 0) return NULL;
+
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "Impossible d'ouvrir le fichier %s\n", filename);
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    int n_file;
+    if (fscanf(f, "%d", &n_file) != 1 || n_file != n) {
+        fprintf(stderr, "Taille n incohérente dans le fichier\n");
+        fclose(f);
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    int *mat = alloc_int_array(n * n);
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            if (fscanf(f, "%d", &mat[i * n + j]) != 1) {
+                fprintf(stderr, "Erreur de lecture de la matrice\n");
+                fclose(f);
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+            }
+        }
+    }
+
+    fclose(f);
+    return mat;
+}
+
+/**
+ * @brief Écrit la matrice n x n dans un fichier (rang 0 seulement).
+ */
+static void write_full_matrix(const char *filename, int *mat, int n, int rank) {
+    if (rank != 0) return;
+
+    FILE *f = fopen(filename, "w");
+    if (!f) {
+        fprintf(stderr, "Impossible d'ouvrir le fichier %s en écriture\n", filename);
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    fprintf(f, "%d\n", n);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            fprintf(f, "%d ", mat[i * n + j]);
+        }
+        fprintf(f, "\n");
+    }
+
+    fclose(f);
+}
+
+/**
+ * @brief Copie un bloc b x b de la matrice globale vers un buffer local.
+ *
+ * @param global  matrice globale n x n (rang 0)
+ * @param n       taille globale
+ * @param block   buffer de taille b*b
+ * @param b       taille de bloc
+ * @param br      indice de bloc en ligne
+ * @param bc      indice de bloc en colonne
+ */
+static void copy_block_from_global(int *global, int n,
+                                   int *block, int b,
+                                   int br, int bc) {
+    int row_offset = br * b;
+    int col_offset = bc * b;
+
+    for (int i = 0; i < b; ++i) {
+        for (int j = 0; j < b; ++j) {
+            block[i * b + j] = global[(row_offset + i) * n + (col_offset + j)];
+        }
+    }
+}
+
+/**
+ * @brief Copie un bloc local b x b dans la matrice globale.
+ */
+static void copy_block_to_global(int *global, int n,
+                                 int *block, int b,
+                                 int br, int bc) {
+    int row_offset = br * b;
+    int col_offset = bc * b;
+
+    for (int i = 0; i < b; ++i) {
+        for (int j = 0; j < b; ++j) {
+            global[(row_offset + i) * n + (col_offset + j)] = block[i * b + j];
+        }
+    }
+}
+
+/**
+ * @brief Phase 1 : Floyd-Warshall sur un bloc diagonal b x b.
+ */
+static void floyd_phase1_diagonal(int *block, int b) {
+    for (int k = 0; k < b; ++k) {
+        for (int i = 0; i < b; ++i) {
+            int dik = block[i * b + k];
+            if (dik == INF) continue;
+            for (int j = 0; j < b; ++j) {
+                int k_j = block[k * b + j];
+                if (k_j == INF) continue;
+                int cand = dik + k_j;
+                if (cand < block[i * b + j]) {
+                    block[i * b + j] = cand;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Phase 2 (ligne k) : met à jour un bloc (k, j) avec le bloc diagonal diag.
+ *
+ * block : bloc (k, j)
+ * diag  : bloc (k, k)
+ */
+static void floyd_phase2_row(int *block, int *diag, int b) {
+    for (int kk = 0; kk < b; ++kk) {
+        for (int i = 0; i < b; ++i) {
+            int dik = diag[i * b + kk];
+            if (dik == INF) continue;
+            for (int j = 0; j < b; ++j) {
+                int k_j = block[kk * b + j];
+                if (k_j == INF) continue;
+                int cand = dik + k_j;
+                if (cand < block[i * b + j]) {
+                    block[i * b + j] = cand;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Phase 2 (colonne k) : met à jour un bloc (i, k) avec le bloc diagonal diag.
+ *
+ * block : bloc (i, k)
+ * diag  : bloc (k, k)
+ */
+static void floyd_phase2_col(int *block, int *diag, int b) {
+    for (int kk = 0; kk < b; ++kk) {
+        for (int i = 0; i < b; ++i) {
+            int i_k = block[i * b + kk];
+            if (i_k == INF) continue;
+            for (int j = 0; j < b; ++j) {
+                int k_j = diag[kk * b + j];
+                if (k_j == INF) continue;
+                int cand = i_k + k_j;
+                if (cand < block[i * b + j]) {
+                    block[i * b + j] = cand;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Phase 3 : met à jour un bloc (i, j) avec les blocs (i, k) (colBlock) et (k, j) (rowBlock).
+ */
+static void floyd_phase3(int *block, int *colBlock, int *rowBlock, int b) {
+    for (int kk = 0; kk < b; ++kk) {
+        for (int i = 0; i < b; ++i) {
+            int i_k = colBlock[i * b + kk];
+            if (i_k == INF) continue;
+            for (int j = 0; j < b; ++j) {
+                int k_j = rowBlock[kk * b + j];
+                if (k_j == INF) continue;
+                int cand = i_k + k_j;
+                if (cand < block[i * b + j]) {
+                    block[i * b + j] = cand;
+                }
+            }
+        }
+    }
+}
+
+int main(int argc, char **argv) {
+    MPI_Init(&argc, &argv);
+
+    int rank, nprocs;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
+    if (argc < 5) {
+        if (rank == 0) {
+            fprintf(stderr, "Usage: %s n b input.txt output.txt\n", argv[0]);
+        }
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    int n = atoi(argv[1]);
+    int b = atoi(argv[2]);
+    const char *input_file = argv[3];
+    const char *output_file = argv[4];
+
+    if (n % b != 0) {
+        if (rank == 0) {
+            fprintf(stderr, "Erreur: n doit être divisible par b\n");
+        }
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    int p = n / b; // nombre de blocs par dimension
+    if (p * p != nprocs) {
+        if (rank == 0) {
+            fprintf(stderr, "Erreur: nprocs doit être égal à (n / b) * (n / b)\n");
+        }
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    int q = (int)sqrt((double)nprocs);
+    if (q * q != nprocs || q != p) {
+        if (rank == 0) {
+            fprintf(stderr, "Erreur: nprocs doit être un carré parfait et égal à (n / b)^2\n");
+        }
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+    }
+
+    // Création d'une grille cartésienne 2D p x p
+    int dims[2] = {p, p};
+    int periods[2] = {0, 0};
+    MPI_Comm cart_comm;
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &cart_comm);
+
+    int cart_rank;
+    MPI_Comm_rank(cart_comm, &cart_rank);
+
+    int coords[2];
+    MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
+    int pr = coords[0]; // indice de bloc en ligne
+    int pc = coords[1]; // indice de bloc en colonne
+
+    // Communicateurs de ligne et de colonne
+    MPI_Comm row_comm, col_comm;
+    int remain_dims[2];
+
+    // Communicateur de ligne : on garde la 2ème dimension (colonnes)
+    remain_dims[0] = 0;
+    remain_dims[1] = 1;
+    MPI_Cart_sub(cart_comm, remain_dims, &row_comm);
+
+    // Communicateur de colonne : on garde la 1ère dimension (lignes)
+    remain_dims[0] = 1;
+    remain_dims[1] = 0;
+    MPI_Cart_sub(cart_comm, remain_dims, &col_comm);
+
+    int row_rank, col_rank;
+    MPI_Comm_rank(row_comm, &row_rank);
+    MPI_Comm_rank(col_comm, &col_rank);
+
+    // Rang 0 lit la matrice complète
+    int *full_matrix = read_full_matrix(input_file, n, rank);
+
+    // Distribution des blocs b x b vers chaque processus
+    int *local_block = alloc_int_array(b * b);
+
+    if (rank == 0) {
+        // Envoi des blocs
+        for (int br = 0; br < p; ++br) {
+            for (int bc = 0; bc < p; ++bc) {
+                int dest_coords[2] = {br, bc};
+                int dest_rank;
+                MPI_Cart_rank(cart_comm, dest_coords, &dest_rank);
+
+                if (dest_rank == 0) {
+                    copy_block_from_global(full_matrix, n, local_block, b, br, bc);
+                } else {
+                    int *tmp_block = alloc_int_array(b * b);
+                    copy_block_from_global(full_matrix, n, tmp_block, b, br, bc);
+                    MPI_Send(tmp_block, b * b, MPI_INT, dest_rank, 0, cart_comm);
+                    free(tmp_block);
+                }
+            }
+        }
+    } else {
+        MPI_Recv(local_block, b * b, MPI_INT, 0, 0, cart_comm, MPI_STATUS_IGNORE);
+    }
+
+    // Buffers pour les phases
+    int *diag_block = alloc_int_array(b * b);
+    int *row_block  = alloc_int_array(b * b);
+    int *col_block  = alloc_int_array(b * b);
+
+    // Boucle principale sur les blocs diagonaux k = 0..p-1
+    for (int k = 0; k < p; ++k) {
+        // PHASE 1: bloc diagonal (k, k)
+        if (pr == k && pc == k) {
+            floyd_phase1_diagonal(local_block, b);
+            // Copie dans diag_block pour diffusion
+            for (int i = 0; i < b * b; ++i) {
+                diag_block[i] = local_block[i];
+            }
+        }
+
+        // Diffusion du bloc diagonal dans la ligne k
+        if (pr == k) {
+            MPI_Bcast(diag_block, b * b, MPI_INT, k, row_comm);
+        }
+
+        // Diffusion du bloc diagonal dans la colonne k
+        if (pc == k) {
+            MPI_Bcast(diag_block, b * b, MPI_INT, k, col_comm);
+        }
+
+        // PHASE 2: mise à jour des blocs de la ligne k et de la colonne k
+        if (pr == k && pc != k) {
+            // Bloc (k, j), j != k
+            floyd_phase2_row(local_block, diag_block, b);
+        }
+        if (pc == k && pr != k) {
+            // Bloc (i, k), i != k
+            floyd_phase2_col(local_block, diag_block, b);
+        }
+
+        // PHASE 3: mise à jour des blocs (i, j) avec i != k, j != k
+        // On diffuse pour chaque ligne i le bloc (i, k) sur row_comm
+        // et pour chaque colonne j le bloc (k, j) sur col_comm.
+
+        // 1) Diffusion des blocs de colonne (i, k) le long des lignes
+        if (pc == k) {
+            // Ce processus possède le bloc (pr, k)
+            // On le met dans col_block puis on le diffuse dans sa ligne
+            for (int i = 0; i < b * b; ++i) {
+                col_block[i] = local_block[i];
+            }
+        }
+        // Tous les processus de la même ligne reçoivent col_block
+        MPI_Bcast(col_block, b * b, MPI_INT, k, row_comm);
+
+        // 2) Diffusion des blocs de ligne (k, j) le long des colonnes
+        if (pr == k) {
+            // Ce processus possède le bloc (k, pc)
+            // On le met dans row_block puis on le diffuse dans sa colonne
+            for (int i = 0; i < b * b; ++i) {
+                row_block[i] = local_block[i];
+            }
+        }
+        // Tous les processus de la même colonne reçoivent row_block
+        MPI_Bcast(row_block, b * b, MPI_INT, k, col_comm);
+
+        // 3) Mise à jour des blocs (i, j) avec i != k, j != k
+        if (pr != k && pc != k) {
+            floyd_phase3(local_block, col_block, row_block, b);
+        }
+
+        MPI_Barrier(cart_comm);
+    }
+
+    // Rassemblement des blocs vers le rang 0
+    if (rank == 0) {
+        for (int br = 0; br < p; ++br) {
+            for (int bc = 0; bc < p; ++bc) {
+                int src_coords[2] = {br, bc};
+                int src_rank;
+                MPI_Cart_rank(cart_comm, src_coords, &src_rank);
+
+                if (src_rank == 0) {
+                    copy_block_to_global(full_matrix, n, local_block, b, br, bc);
+                } else {
+                    int *tmp_block = alloc_int_array(b * b);
+                    MPI_Recv(tmp_block, b * b, MPI_INT, src_rank, 1, cart_comm, MPI_STATUS_IGNORE);
+                    copy_block_to_global(full_matrix, n, tmp_block, b, br, bc);
+                    free(tmp_block);
+                }
+            }
+        }
+    } else {
+        MPI_Send(local_block, b * b, MPI_INT, 0, 1, cart_comm);
+    }
+
+    // Rang 0 écrit la matrice résultat
+    write_full_matrix(output_file, full_matrix, n, rank);
+
+    // Nettoyage
+    free(local_block);
+    free(diag_block);
+    free(row_block);
+    free(col_block);
+
+    if (rank == 0) {
+        free(full_matrix);
+    }
+
+    MPI_Comm_free(&row_comm);
+    MPI_Comm_free(&col_comm);
+    MPI_Comm_free(&cart_comm);
+
     MPI_Finalize();
-    return 1;
-  }
-  
-  std::string_view filename = argv[1];
-  int root = std::atoi(argv[2]);
-  
-  if(rank == root) {
-    auto [adjacency_matrix, nodes, nodes_count] = ReadGraph(filename);
-  }
-  // TODO: adjancency matrix est définie dans le if mais tout le monde en a besoin pour Scatterv!
-  
-  int b = compute_block_size(nodes_count, processors_count);
-  auto [sendcounts, displs] = prepare_scatterv(nodes_count, processors_count, b);
-  std::vector<int> local_block(sendcounts[rank]);
-  MPI_Scatterv(adj.data(), sendcounts.data(), displs.data(),
-               MPI_INT, local_block.data(), sendcounts[rank], MPI_INT,
-               0, MPI_COMM_WORLD);
-  return local_block;
-  
-  
-  MPI_Finalize();
-  return 0;
-}
-
-
-/// @brief Retourne la taille de bloc b pour découper la matrice en approx `processors_count` blocs
-inline int compute_block_size(int nodes_count, int processors_count) {
-    return static_cast<int>(std::ceil(nodes_count / std::sqrt(static_cast<double>(processors_count))));
-}
-
-/// @brief Retourne les indices de blocs (i,j) pour la matrice
-inline auto generate_block_indices(int blocks_per_dim) {
-    return std::views::iota(0, blocks_per_dim * blocks_per_dim);
-}
-
-/// @brief Calcule le nombre d'éléments dans un bloc (en gérant les bords)
-inline int block_size(int bi, int bj, int b, int nodes_count) {
-    int rows = std::min(b, nodes_count - bi * b);
-    int cols = std::min(b, nodes_count - bj * b);
-    return rows * cols;
-}
-
-/// @brief Prépare sendcounts et displs pour MPI_Scatterv
-std::tuple<std::vector<int>, std::vector<int>> prepare_scatterv(int nodes_count, int processors_count, int b) {
-    int blocks_per_dim = (nodes_count + b - 1) / b;
-    int total_blocks = blocks_per_dim * blocks_per_dim;
-    int blocks_per_proc = (total_blocks + processors_count - 1) / processors_count;
-
-    std::vector<int> sendcounts(processors_count, 0);
-    std::vector<int> displs(processors_count, 0);
-
-    auto blocks = generate_block_indices(blocks_per_dim);
-    for (int rank = 0; rank < processors_count; ++rank) {
-        int start = rank * blocks_per_proc;
-        int end = std::min(start + blocks_per_proc, total_blocks);
-        sendcounts[rank] = std::accumulate(
-            blocks | std::views::drop(start) | std::views::take(end - start),
-            0,
-            [blocks_per_dim, b, nodes_count](int sum, int idx) {
-                int bi = idx / blocks_per_dim;
-                int bj = idx % blocks_per_dim;
-                return sum + block_size(bi, bj, b, nodes_count);
-            });
-        displs[rank] = (rank == 0 ? 0 : displs[rank - 1] + sendcounts[rank - 1]);
-    }
-    return {sendcounts, displs};
+    return 0;
 }
