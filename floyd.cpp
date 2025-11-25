@@ -17,80 +17,239 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Ce fichier propose une parallélisation de l'algorithme de Floyd-Warshall
-// en utilisant MPI.
+// en utilisant OpenMPI 5+ et ISO C++ 11.
 
-// mpirun -n N ./floyd example.dot > output.txt
+#include <sstream>
 
-
-#include <fstream>
 #include <iostream>
+#include <fstream>
+#include <string>
+#include <unordered_map>
 
+#include <graphviz/cgraph.h>
 #include <mpi.h>
+
+constexpr int kInfinity = std::numeric_limits<int>::max();
 
 int
 main(int argc, char **argv)
 {
-    // Initialisation et récupération des arguments du programme.
+  int status = EXIT_SUCCESS;
 
-    MPI_Init(&argc, &argv);
+  // Récupération des arguments du programme.
 
-    int worker_id;
-    int workers_count;
-    MPI_Comm_rank(MPI_COMM_WORLD, &worker_id);
-    MPI_Comm_size(MPI_COMM_WORLD, &workers_count);
+  MPI_Init(&argc, &argv);
 
-    std::string exe = argv[0];
-    if (argc != 3) {
-        std::cerr << "Utilisation : " << exe << " <root> <input>" << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-        return 1;
+  int pid, nprocs;
+  MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
+  if (argc != 4) {
+    std::cout << "usage: " << argv[0] << " <root> <b> <input>" << std::endl;
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
+
+  int root;
+  try
+  {
+    root = std::stoi(argv[1], nullptr, 10);
+
+    if (root < 0 || root >= nprocs) {
+      std::cerr << argv[0] << ": root doit être un processeur valide" << std::endl;
+      status = EXIT_FAILURE;
+      goto cleanup;
     }
+  }
+  catch (std::invalid_argument const& _ex)
+  {
+    std::cerr << argv[0] << ": root doit être un entier" << std::endl;
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
+  catch (std::out_of_range const& _ex)
+  {
+    std::cerr << argv[0] << ": root doit être une valeur raisonnable" << std::endl;
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
 
-    int root_id = 0;
+  int b;
+  try
+  {
+    b = std::stoi(argv[2], nullptr, 10);
+
+    if (b <= 0) {
+      std::cerr << argv[0] << ": b doit être positif" << std::endl;
+      status = EXIT_FAILURE;
+      goto cleanup;
+    }
+  }
+  catch (std::invalid_argument const& _ex)
+  {
+    std::cerr << argv[0] << ": b doit être un entier" << std::endl;
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
+  catch (std::out_of_range const& _ex)
+  {
+    std::cerr << argv[0] << ": b doit être une valeur raisonnable" << std::endl;
+    status = EXIT_FAILURE;
+    goto cleanup;
+  }
+
+  std::string input = argv[3];
+
+  // Initialisation de la matrice A.
+
+  int n;
+  int *A = nullptr;
+
+  if (pid == root)
+  {
+    // Lecture et compilation.
+
+    FILE *fd = fopen(input, "r");
+    if(!fd)
     {
-        char* end = nullptr;
-        long value = std::strtol(argv[1], &end, 10);
-        if (*end != '\0') {
-            std::cerr << exe << " : \"" << argv[1] << "\" n'est pas un entier valide." << std::endl;
-            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;
-        }
-
-        if (value < 0) {
-            std::cerr << exe << " : root doit être supérieur ou égal à 0." << std::endl;
-            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;
-        }
-
-        if (value > std::numeric_limits<int>::max()) {
-            std::cerr << exe << " : root doit être strictement inférieur à " << std::numeric_limits<int>::max() << "." << std::endl;
-            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;
-        }
-
-        root_id = static_cast<int>(value);
+      std::cerr << argv[0] << ": \"" << input << "\" ne peut pas être ouvert" << std::endl;
+      status = EXIT_FAILURE;
+      goto cleanup;
     }
 
-    std::string input = argv[2];
-    std::istream file(input);
-    if (!file.good()) {
-        std::cerr << exe << " : le fichier \"" << filename << "\" est introuvable." << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-        return 1;
+    Agraph_t *G = agread(fd, nullptr);
+    if (!G)
+    {
+      std::cerr << argv[0] << ": \"" << input << "\" ne peut pas être compilé" << std::endl;
+      status = EXIT_FAILURE;
+      goto cleanup;
     }
 
-    // Compiler le fichier DOT en une matrice adjacente.
+    fclose(fd);
 
-    // Repartition des données sur tous les travailleurs disponibles.
+    n = agnnodes(G);
+    std::map<std::string, int> index;
+    index.reserve(n);
 
-    // Algorithme de Floyd-Warshall en parallèle.
+    for (int t = 0, Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
+      index.emplace(agnameof(u), t++)
+    }
 
-    // Unifier la matrice de distance sur le travailleur principal.
+    // Initialisation de A à l'infini sauf sur les diagonales.
 
-    // Afficher la matrice de distance.
+    A = new int[n*n];
 
-    // Nettoyer la mémoire allouée
+    for (int i = 0; i < n*n; i++) {
+      A[i] = kInfinity;
+    }
 
-    MPI_Finalize();
-    return 0;
+    for (int i = 0; i < n; i++) {
+      A[i*n+i] = 0;
+    }
+
+    // Construction de la matrice adjacente.
+
+    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
+      int const i = index[agnameof(u)];
+      for (Agedge_t *e = agfstout(G, u); e; e = agnxtout(G, e)) {
+        Agedge_t *v = aghead(e);
+        int const j = index[agnameof(v)];
+
+        int w;
+        try
+        {
+	  std::string attr = agget(e, (char*)"weight");
+          w = std::stoi(attr, nullptr, 10);
+        }
+        catch (std::invalid_argument const& _ex)
+        {
+          std::cerr << argv[0] << ": le weight d'une arête doit être un entier" << std::endl;
+          status = EXIT_FAILURE;
+          goto cleanup;
+        }
+        catch (std::out_of_range const& _ex)
+        {
+          std::cerr << argv[0] << ": le weight d'une arête doit être une valeur raisonnable" << std::endl;
+          status = EXIT_FAILURE;
+          goto cleanup;
+        }
+
+        A[i*n+j] = A[j*n+i] = w;
+      }
+    }
+
+    agclose(G);
+  }
+
+  // Découpage de A en blocs locaux D.
+
+  int *D = new int[b*b]; // hypothèses dans le sujet.
+  MPI_Bcast(&n, 1, MPI_INT, root, MPI_COMM_WORLD);
+  MPI_Scatter(A, b*b, MPI_INT, D, b*b, MPI_INT, root, MPI_COMM_WORLD); // ??
+
+  int *D2 = new int[b*b];
+  // Algorithme de Floyd-Warshall.
+
+  for (int l = 0; l < n; l++)
+  {
+    // Calcul
+
+    // Extraction des données requises.
+
+    // Transmission des données aux autres.
+
+    // Mise-à-jour des blocs locaux.
+
+    SWAP(D, D2);
+  }
+
+  // Récupération des blocs locaux.
+
+  MPI_Gather(D, b*b, MPI_INT, A, b*b, MPI_INT, root, MPI_COMM_WORLD);
+
+  // Affichage final.
+
+  // TODO
+
+  // Nettoyage du programe.
+
+ cleanup:
+   delete[] D2;
+   delete[] D;
+   delete[] A;
+
+  MPI_Finalize();
+  return status;
 }
+
+
+  int qrows, qcols;
+  int *qrow = nullptr, *qcol = nullptr; // Données de pivots.
+  int q; // Coordonnée de ligne/colonne du bloc pivot.
+  int d; // Nouvelle valeur calculée pour un élément de D.
+
+  qrow = new int[b];
+  qcol = new int[b];
+  for (l = 0; l < n; ++l) {
+
+    // Déterminer les blocs aux valeurs pivots et les récupérer,
+    // ainsi que partager nos valeurs pivots aux autres.
+
+    q = l/b;
+    MPI_Bcast(qrow, b, MPI_INT, q*nb+q, MPI_COMM_WORLD);
+    MPI_Bcast(qcol, b, MPI_INT, q*nb+q, MPI_COMM_WORLD);
+
+    // Calculer D(l).
+
+    for (i = 0; i < b; ++i) {
+      for (j = 0; j < b; ++j) {
+        d = qrow[i] + qcol[j];
+	D[i*b+j] = d <= D[i*b+j] ? d : D[i*b+j];
+      }
+    }
+  }
+
+
+cleanup:
+  delete[] qrow;
+  delete[] qcol;
