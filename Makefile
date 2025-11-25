@@ -16,5 +16,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 floyd: floyd.cpp
-	mpicxx -Wall -Wextra -Ilibm -O3 -o floyd floyd.cpp
+	mpicxx       \
+	  -std=c++11 \
+	  -Wall      \
+	  -Wextra    \
+	  -pedantic  \
+	  -I/opt/homebrew/include \
+	  -L/opt/homebrew/lib \
+	  -lcgraph   \
+	  -O3        \
+	  -o floyd   \
+	  floyd.cpp
 
