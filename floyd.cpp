@@ -19,12 +19,10 @@
 // Ce fichier propose une parallélisation de l'algorithme de Floyd-Warshall
 // en utilisant OpenMPI 5+ et ISO C++ 11.
 
-#include <sstream>
-
+#include <cstdio>
 #include <iostream>
-#include <fstream>
 #include <string>
-#include <unordered_map>
+#include <map>
 
 #include <graphviz/cgraph.h>
 #include <mpi.h>
@@ -36,6 +34,11 @@ main(int argc, char **argv)
 {
   int status = EXIT_SUCCESS;
 
+  int *A = nullptr;
+  int *D = nullptr;
+  int *D2 = nullptr;
+  char* input = nullptr;
+
   // Récupération des arguments du programme.
 
   MPI_Init(&argc, &argv);
@@ -44,7 +47,8 @@ main(int argc, char **argv)
   MPI_Comm_rank(MPI_COMM_WORLD, &pid);
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-  if (argc != 4) {
+  if (argc != 4)
+  {
     std::cout << "usage: " << argv[0] << " <root> <b> <input>" << std::endl;
     status = EXIT_FAILURE;
     goto cleanup;
@@ -98,18 +102,17 @@ main(int argc, char **argv)
     goto cleanup;
   }
 
-  std::string input = argv[3];
+  input = argv[3];
 
   // Initialisation de la matrice A.
 
   int n;
-  int *A = nullptr;
 
   if (pid == root)
   {
     // Lecture et compilation.
 
-    FILE *fd = fopen(input, "r");
+    FILE *fd = std::fopen(input, "r");
     if(!fd)
     {
       std::cerr << argv[0] << ": \"" << input << "\" ne peut pas être ouvert" << std::endl;
@@ -129,30 +132,35 @@ main(int argc, char **argv)
 
     n = agnnodes(G);
     std::map<std::string, int> index;
-    index.reserve(n);
 
-    for (int t = 0, Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
-      index.emplace(agnameof(u), t++)
+    int t = 0;
+    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u))
+    {
+      index.emplace(agnameof(u), t++);
     }
 
     // Initialisation de A à l'infini sauf sur les diagonales.
 
     A = new int[n*n];
 
-    for (int i = 0; i < n*n; i++) {
+    for (int i = 0; i < n*n; i++)
+    {
       A[i] = kInfinity;
     }
 
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++)
+    {
       A[i*n+i] = 0;
     }
 
     // Construction de la matrice adjacente.
 
-    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
+    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u))
+    {
       int const i = index[agnameof(u)];
-      for (Agedge_t *e = agfstout(G, u); e; e = agnxtout(G, e)) {
-        Agedge_t *v = aghead(e);
+      for (Agedge_t *e = agfstout(G, u); e; e = agnxtout(G, e))
+      {
+        Agnode_t *v = aghead(e);
         int const j = index[agnameof(v)];
 
         int w;
@@ -183,11 +191,12 @@ main(int argc, char **argv)
 
   // Découpage de A en blocs locaux D.
 
-  int *D = new int[b*b]; // hypothèses dans le sujet.
+  D = new int[b*b]; // hypothèses dans le sujet.
   MPI_Bcast(&n, 1, MPI_INT, root, MPI_COMM_WORLD);
   MPI_Scatter(A, b*b, MPI_INT, D, b*b, MPI_INT, root, MPI_COMM_WORLD); // ??
 
-  int *D2 = new int[b*b];
+  D2 = new int[b*b];
+
   // Algorithme de Floyd-Warshall.
 
   for (int l = 0; l < n; l++)
@@ -200,7 +209,7 @@ main(int argc, char **argv)
 
     // Mise-à-jour des blocs locaux.
 
-    SWAP(D, D2);
+    // SWAP(D, D2);
   }
 
   // Récupération des blocs locaux.
@@ -209,7 +218,15 @@ main(int argc, char **argv)
 
   // Affichage final.
 
-  // TODO
+  for (int i = 0; i < n; i++)
+  {
+    for (int j = 0; j < n; j++)
+    {
+      std::cout << A[i*n+j] << " ";
+    }
+
+    std::cout << std::endl;
+  }
 
   // Nettoyage du programe.
 
@@ -222,7 +239,7 @@ main(int argc, char **argv)
   return status;
 }
 
-
+#if 0
   int qrows, qcols;
   int *qrow = nullptr, *qcol = nullptr; // Données de pivots.
   int q; // Coordonnée de ligne/colonne du bloc pivot.
@@ -253,3 +270,4 @@ main(int argc, char **argv)
 cleanup:
   delete[] qrow;
   delete[] qcol;
+#endif
