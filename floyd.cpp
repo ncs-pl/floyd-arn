@@ -19,6 +19,7 @@
 // Ce fichier propose une parallélisation de l'algorithme de Floyd-Warshall
 // en utilisant OpenMPI 5+ et ISO C++ 11.
 
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -36,7 +37,7 @@ main(int argc, char **argv)
 
   int *A = nullptr;
   int *D = nullptr;
-  int *D2 = nullptr;
+  int *Q = nullptr;
   char* input = nullptr;
 
   // Récupération des arguments du programme.
@@ -187,29 +188,51 @@ main(int argc, char **argv)
     }
 
     agclose(G);
+
+    // Affichage de A.
+
+    std::cout << "Matrice adjacente :" << std::endl;
+
+    for (int i = 0; i < n; i++)
+    {
+      for (int j = 0; j < n; j++)
+      {
+        std::cout << "    " << A[i*n+j] << " ";
+      }
+
+      std::cout << std::endl;
+    }
   }
 
   // Découpage de A en blocs locaux D.
 
   D = new int[b*b]; // hypothèses dans le sujet.
   MPI_Bcast(&n, 1, MPI_INT, root, MPI_COMM_WORLD);
-  MPI_Scatter(A, b*b, MPI_INT, D, b*b, MPI_INT, root, MPI_COMM_WORLD); // ??
-
-  D2 = new int[b*b];
+  MPI_Scatter(A, b*b, MPI_INT, D, b*b, MPI_INT, root, MPI_COMM_WORLD);
 
   // Algorithme de Floyd-Warshall.
 
+  Q = new int[n];
+
   for (int l = 0; l < n; l++)
   {
-    // Calcul
+    if (pid == l/b)
+    {
+      for (int i = 0; i < n; i++)
+      {
+        Q[i] = D[(l%b)*n+i];
+      }
+    }
 
-    // Extraction des données requises.
+    MPI_Bcast(Q, n, MPI_INT, l/b, MPI_COMM_WORLD);
 
-    // Transmission des données aux autres.
-
-    // Mise-à-jour des blocs locaux.
-
-    // SWAP(D, D2);
+    for (int i = 0; i < b; i++)
+    {
+      for (int j = 0; j < n; j++)
+      {
+	D[i*n+j] = std::min(D[i*n+j], D[i*n+l] + Q[j]);
+      }
+    }
   }
 
   // Récupération des blocs locaux.
@@ -218,20 +241,25 @@ main(int argc, char **argv)
 
   // Affichage final.
 
-  for (int i = 0; i < n; i++)
+  if (pid == root)
   {
-    for (int j = 0; j < n; j++)
-    {
-      std::cout << A[i*n+j] << " ";
-    }
+    std::cout << "Matrice finale :" << std::endl;
 
-    std::cout << std::endl;
+    for (int i = 0; i < n; i++)
+    {
+      for (int j = 0; j < n; j++)
+      {
+        std::cout << "    " << A[i*n+j] << " ";
+      }
+
+      std::cout << std::endl;
+    }
   }
 
   // Nettoyage du programe.
 
  cleanup:
-   delete[] D2;
+   delete[] Q;
    delete[] D;
    delete[] A;
 
