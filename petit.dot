@@ -1,0 +1,19 @@
+graph G {
+    A [label="A"];
+    B [label="B"];
+    C [label="C"];
+    D [label="D"];
+    E [label="E"];
+    F [label="F"];
+    G [label="G"];
+    H [label="H"];
+
+    A -- B [label="5", weight=5];
+    A -- C [label="2", weight=2];
+    B -- D [label="1", weight=1];
+    B -- E [label="4", weight=4];
+    C -- D [label="3", weight=3];
+    C -- F [label="6", weight=6];
+    D -- G [label="2", weight=2];
+    E -- H [label="3", weight=3];
+}

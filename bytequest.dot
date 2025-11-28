@@ -1,7 +1,4 @@
-graph bytequest {
-    node [shape=circle, style=filled, color=lightyellow, fontcolor=black];
-    edge [color=black, fontcolor=blue];
-
+graph G {
     A [label="A"];
     B [label="B"];
     C [label="C"];
@@ -10,6 +7,6 @@ graph bytequest {
     A -- B [label="2", weight=2];
     A -- D [label="3", weight=3];
     B -- C [label="2", weight=2];
+    B -- D [label="6", weight=6];
     C -- D [label="4", weight=4];
-    D -- B [label="6", weight=6];
 }
