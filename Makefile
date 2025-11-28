@@ -25,6 +25,8 @@ floyd: floyd.cpp
 	  -L/opt/homebrew/lib \
 	  -lcgraph   \
 	  -O3        \
+	  -g \
+	  -fsanitize=address \
 	  -o floyd   \
 	  floyd.cpp
 

@@ -12,235 +12,293 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Ce fichier propose une parallélisation de l'algorithme de Floyd-Warshall
 // en utilisant OpenMPI 5+ et ISO C++ 11.
 
+// mpirun -np 4 ./floyd 0 2 bytequest.dot
+// mpirun -np 4 ./floyd 0 4 petit.dot
+// mpirun -np 16 ./floyd 0 5 grand.dot
+
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <functional>
 #include <iostream>
-#include <string>
 #include <map>
+#include <string>
+#include <vector>
 
 #include <graphviz/cgraph.h>
 #include <mpi.h>
 
 constexpr int kInfinity = std::numeric_limits<int>::max();
-constexpr int kTrue = 1;
-constexpr int kFalse = 0;
+constexpr int kScatterTag = 1;
+constexpr int kGatherTag = 2;
 
-int
-main(int argc, char **argv)
+class Matrix {
+private:
+  size_t m_rows, m_columns;
+  std::vector<int> m_buffer;
+
+public:
+  Matrix(size_t rows, size_t columns) : m_rows(rows), m_columns(columns), m_buffer(rows * columns) {}
+
+  int& operator()(size_t i, size_t j) { return m_buffer[i * m_columns + j]; }
+  int operator()(size_t i, size_t j) const { return m_buffer[i * m_columns + j]; }
+
+  size_t rows() const { return m_rows; }
+  size_t cols() const { return m_columns; }
+  size_t size() const { return m_rows * m_columns; }
+  int *data() { return m_buffer.data(); }
+  const int *data() const { return m_buffer.data(); }
+};
+
+std::ostream& operator<<(std::ostream& os, const Matrix& M) {
+  for (size_t i = 0; i < M.rows(); ++i) {
+    for (size_t j = 0; j < M.cols(); ++j) {
+      int v = M(i, j);
+
+      if (v == kInfinity) {
+        os << "∞";
+      } else {
+        os << v;
+      }
+
+      if (j + 1 < M.cols()) {
+        os << ' ';
+      }
+    }
+
+    if (i + 1 < M.rows()) {
+      os << '\n';
+    }
+  }
+
+  return os;
+}
+
+void
+CreateTopology(MPI_Comm wld, MPI_Comm *cart, MPI_Comm *rows, MPI_Comm *cols)
 {
-  int status = 0; // pas EXIT_SUCCESS...
-  int i, j, k; // itérateurs de boucle
+  int np = 0;
+  MPI_Comm_size(wld, &np);
 
-  int pid, nprocs;
-  int root;
-  int b; // longueur d'un bloc
-  char* input = nullptr;
-  int *A = nullptr;
+  int dims[2] = {0, 0};
+  MPI_Dims_create(np, 2, dims);
 
-  FILE* fd = nullptr; // file descriptor d'input
-  std::map<std::string, int> index;
-  Agraph_t *G;
-  Agnode_t *u, *v;
-  Agedge_t *e;
+  int pds[2] = {false, false};
+  MPI_Cart_create(wld, 2, dims, pds, true, cart);
 
-  int *D = nullptr;
-  int *KC = nullptr; // colonne pivots
-  int *KR = nullptr; // ligne pivots
+  int rdims[2] = {false, true};
+  int cdims[2] = {true, false};
+  MPI_Cart_sub(*cart, rdims, rows);
+  MPI_Cart_sub(*cart, cdims, cols);
+}
 
-  int n; // nombre de sommets.
-  int q; // nombre de blocs
-
-  MPI_Comm ccart, crow, ccol;
-  int *co = nullptr; // (ligne, colonne)
-  int *dims = nullptr;
-  int *pds = nullptr;
-
-  // Récupération des arguments du programme.
-
-  MPI_Init(&argc, &argv);
-
-  MPI_Comm_rank(MPI_COMM_WORLD, &pid);
-  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-
-  if (argc != 4) {
-    std::cout << "usage: " << argv[0] << " <root> <b> <input>" << std::endl;
-    status = EXIT_FAILURE;
-    goto cleanup;
-  }
-
-  root = std::stoi(argv[1], nullptr, 10);
-
-  if (root < 0 || root >= nprocs) {
-    std::cerr << argv[0] << ": root doit être un processeur valide" << std::endl;
-    status = EXIT_FAILURE;
-    goto cleanup;
-  }
-
-  b = std::stoi(argv[2], nullptr, 10);
-  if (b <= 0) {
-    std::cerr << argv[0] << ": b doit être positif" << std::endl;
-    status = EXIT_FAILURE;
-    goto cleanup;
-  }
-
-  input = argv[3];
-
-  // Initialisation de la matrice A.
-
-
+void
+CompileGraphFile(std::string& input, Matrix& A, int pid, int root)
+{
   if (pid == root) {
-    // Lecture et compilation.
-
-    fd = std::fopen(input, "r");
-    G = agread(fd, nullptr);
+    FILE *fd = std::fopen(input.c_str(), "r");
+    Agraph_t *G = agread(fd, nullptr);
     fclose(fd);
 
-    n = agnnodes(G);
+    int n = agnnodes(G);
 
-    i = 0;
-    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u))
-    {
-      index.emplace(agnameof(u), i++);
+    A = Matrix(n, n);
+    std::fill(A.data(), A.data() + A.size(), kInfinity);
+    for (size_t i = 0; i < A.rows(); ++i) {
+      A(i, i) = 0;
     }
 
-    // Initialisation de A à l'infini sauf sur les diagonales.
-
-    A = new int[n*n];
-
-    for (i = 0; i < n*n; i++) {
-      A[i] = kInfinity;
+    std::map<std::string, int> index;
+    
+    std::vector<std::string> nodeNames;
+    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
+      nodeNames.push_back(agnameof(u));
+    }
+    
+    // NOTE(nico): tri ici parce que GraphViz ne garantit pas
+    // l'ordre des sommets, même si parfois il respectera celui
+    // défini dans le fichier.
+    std::sort(nodeNames.begin(), nodeNames.end());
+    
+    for (size_t i = 0; i < nodeNames.size(); ++i) {
+      index[nodeNames[i]] = i;
     }
 
-    for (i = 0; i < n; i++) {
-      A[i*n+i] = 0;
-    }
+    for (Agnode_t *u = agfstnode(G); u; u = agnxtnode(G, u)) {
+      const int i = index[agnameof(u)];
 
-    // Construction de la matrice adjacente.
-
-    for (u = agfstnode(G); u; u = agnxtnode(G, u)) {
-      i = index[agnameof(u)];
-      for (e = agfstout(G, u); e; e = agnxtout(G, e)) {
-        v = aghead(e);
-        j = index[agnameof(v)];
-        A[i*n+j] = A[j*n+i] = std::stoi(agget(e, (char*)"weight"), nullptr, 10);
+      for (Agedge_t *e = agfstout(G, u); e; e = agnxtout(G, e)) {
+        Agnode_t *v = aghead(e);
+        const int j = index[agnameof(v)];
+        const int weight = std::stoi(agget(e, (char*)"weight"));
+        A(i, j) = weight;
+        A(j, i) = weight;
       }
     }
 
     agclose(G);
-
-    // Affichage de A.
-
     std::cout << "Matrice adjacente :" << std::endl;
-
-    for (i = 0; i < n; i++) {
-      for (j = 0; j < n; j++) {
-        std::cout << "    "
-	          << (A[i*n+j] == kInfinity ? "∞" : std::to_string(A[i*n+j]))
-		  << " ";
-      }
-      std::cout << std::endl;
-    }
+    std::cout << A << std::endl;
   }
-
-  // Découpage de A en blocs locaux D.
-
-  MPI_Bcast(&n, 1, MPI_INT, root, MPI_COMM_WORLD);
-
-  D = new int[b*b]; // hypothèses dans le sujet.
-  MPI_Scatter(A, b*b, MPI_INT, D, b*b, MPI_INT, root, MPI_COMM_WORLD);
-
-  // Création de la topologie cartésienne.
-
-  // TODO(nico): vérifier (n/b)^2 = nprocs
-  dims = new int[2];
-  dims[0] = dims[1] = n/b;
-
-  pds = new int[2];
-  pds[0] = pds[1] = kTrue;
-
-  MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, kTrue, &ccart);
-
-  co = new int[2];
-  MPI_Cart_coords(ccart, pid, 2, co);
-
-  MPI_Comm_split(ccart, co[0], co[1], &crow);
-  MPI_Comm_split(ccart, co[1], co[0], &ccol);
-
-  // Algorithme de Floyd-Warshall.
-
-  KR = new int[b];
-  KC = new int[b];
-
-  for (k = 0; k < n; k++) {
-    // Identifier les pivots.
-
-    if (co[0] == k/b) {
-      for (i = 0; i < b; i++) {
-        KR[i] = D[(k%b)*b+i];
-      }
-    }
-
-    if (co[1] == k/b) {
-      for (i = 0; i < b; i++) {
-        KC[i] = D[i*b+(k%b)];
-      }
-    }
-
-    // Partage des pivots.
-
-    // TODO: comment bien décider du "root" ?
-    MPI_Bcast(KR, b, MPI_INT, ??, crow);
-    MPI_Bcast(KC, b, MPI_INT, ??, ccol);
-
-    // Mise à jour des blocs locaux.
-
-    for (i = 0; i < b; i++) {
-      for (j = 0; j < n; j++) {
-        D[i*b+j] = std::min(D[i*b+j], KC[i] + KR[j]);
-      }
-    }
-  }
-
-  // Récupération des blocs locaux.
-
-  MPI_Gather(D, b*b, MPI_INT, A, b*b, MPI_INT, root, MPI_COMM_WORLD);
-
-  // Affichage final.
-
-  if (pid == root) {
-    std::cout << "Matrice finale :" << std::endl;
-
-    for (i = 0; i < n; i++) {
-      for (j = 0; j < n; j++) {
-        std::cout << "    " << A[i*n+j] << " ";
-      }
-      std::cout << std::endl;
-    }
-  }
-
-  // Nettoyage du programe.
-
-cleanup:
-  delete[] coords;
-  delete[] periods;
-  delete[] dims;
-  delete[] KR;
-  delete[] KC;
-  delete[] D;
-  delete[] A;
-
-  MPI_Comm_free(&comm_col);
-  MPI_Comm_free(&comm_row);
-  MPI_Comm_free(&comm_cart);
-
-  MPI_Finalize();
-  return status;
 }
 
+void
+ScatterBlocks(Matrix& A, Matrix& D, int pid, int root, MPI_Comm comm)
+{
+  if (pid == root) {
+    for (size_t i = 0; i < A.rows() / D.rows(); ++i) {
+      for (size_t j = 0; j < A.cols() / D.cols(); ++j) {
+        Matrix T(D.rows(), D.cols());
+        for (size_t r = 0; r < D.rows(); ++r) {
+          const int oft = (i*D.rows() + r)*A.cols() + j*D.cols();
+          std::copy(A.data() + oft, A.data() + oft + D.cols(), T.data() + r*D.cols());
+        }
+
+        int dst_co[2] = {(int)i, (int)j};
+        int dst = 0;
+        MPI_Cart_rank(comm, dst_co, &dst);
+
+        if (dst == root) {
+          D = T;
+        } else {
+          // TODO: non-blocking IO
+          MPI_Send(T.data(), T.size(), MPI_INT, dst, kScatterTag, comm);
+        }
+      }
+    }
+  } else {
+    // TODO: non-blocking IO
+    MPI_Recv(D.data(), D.size(), MPI_INT, root, kScatterTag, comm, MPI_STATUS_IGNORE);
+  }
+}
+
+
+void
+FloydWarshall(Matrix& D, size_t n, size_t row, size_t col, MPI_Comm rows_comm,
+  MPI_Comm cols_comm)
+{
+  size_t b = D.rows();
+  
+  for (size_t k = 0; k < n; ++k) {
+    Matrix R(b, b); // ligne pivot pour notre colonne
+    std::fill(R.data(), R.data() + R.size(), kInfinity);
+
+    Matrix C(b, b); // colonne pivot pour notre ligne
+    std::fill(C.data(), C.data() + C.size(), kInfinity);
+    
+    if (col == k/b) {
+      for (size_t i = 0; i < b; ++i) {
+        for (size_t j = 0; j < b; ++j) {
+          C(i, j) = D(i, j);
+        }
+      }
+    }
+    
+    MPI_Bcast(C.data(), C.size(), MPI_INT, k/b, rows_comm);
+    
+    if (row == k/b) {
+      for (size_t i = 0; i < b; ++i) {
+        for (size_t j = 0; j < b; ++j) {
+          R(i, j) = D(i, j);
+        }
+      }
+    }
+    
+    MPI_Bcast(R.data(), R.size(), MPI_INT, k/b, cols_comm);
+    
+    for (size_t i = 0; i < b; ++i) {
+      for (size_t j = 0; j < b; ++j) {
+        int ik = C(i, k%b);
+        int kj = R(k%b, j);
+        
+        if (ik != kInfinity && kj != kInfinity) {
+          D(i, j) = std::min(D(i, j), ik + kj);
+        }
+      }
+    }
+  }
+}
+
+void
+GatherBlocks(Matrix& A, Matrix& D, int pid, int root, MPI_Comm comm)
+{
+  if (pid == root) {
+    for (size_t i = 0; i < A.rows() / D.rows(); ++i) {
+      for (size_t j = 0; j < A.cols() / D.cols(); ++j) {
+        Matrix T(D.rows(), D.cols());
+        int src_co[2] = {(int)i, (int)j};
+        int src = 0;
+        MPI_Cart_rank(comm, src_co, &src);
+
+        if (src == root) {
+          T = D;
+        } else {
+          // TODO: non-blocking IO
+          MPI_Recv(T.data(), T.size(), MPI_INT, src, kGatherTag, comm, MPI_STATUS_IGNORE);
+        }
+
+
+        for (size_t r = 0; r < T.rows(); ++r) {
+          std::copy(T.data() + r * T.cols(), T.data() + (r + 1) * T.cols(), A.data() + (i * T.rows() + r) * A.cols() + j * T.cols());
+        }
+      }
+    }
+
+    std::cout << "Matrice des distances :" << std::endl;
+    std::cout << A << std::endl;
+  } else {
+    // TODO: non-blocking IO
+    MPI_Send(D.data(), D.size(), MPI_INT, root, kGatherTag, comm);
+  }
+}
+
+int
+main(int argc, char **argv)
+{
+  MPI_Init(&argc, &argv);
+
+  if (argc != 4) {
+    std::cout << argv[0] << " root b input" << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+  }
+
+  int root = std::stoi(argv[1], nullptr, 10);
+  int b = std::stoi(argv[2], nullptr, 10);
+  std::string input = argv[3];
+
+  MPI_Comm cart_comm, rows_comm, cols_comm;
+  CreateTopology(MPI_COMM_WORLD, &cart_comm, &rows_comm, &cols_comm);
+  int pid = 0;
+  std::array<int, 2> coords{0, 0};
+  MPI_Comm_rank(cart_comm, &pid);
+  MPI_Cart_coords(cart_comm, pid, 2, coords.data());
+
+  Matrix A(0, 0);
+  CompileGraphFile(input, A, pid, root);
+
+  int n = A.rows();
+  MPI_Bcast(&n, 1, MPI_INT, root, cart_comm);
+
+  Matrix D(b, b);
+  std::fill(D.data(), D.data() + D.size(), kInfinity);
+  ScatterBlocks(A, D, pid, root, cart_comm);
+
+  FloydWarshall(D, n, coords[0], coords[1], rows_comm, cols_comm);
+
+  GatherBlocks(A, D, pid, root, cart_comm);
+
+  MPI_Comm_free(&cart_comm);
+  MPI_Comm_free(&rows_comm);
+  MPI_Comm_free(&cols_comm);
+  MPI_Finalize();
+  return 0;
+}
+
+// vim: ft=cpp expandtab ts=2 sw=2 sts=2
