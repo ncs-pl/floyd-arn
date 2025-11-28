@@ -4,4 +4,5 @@ Thumbs.db
 *.dll
 *.so
 floyd
+*.dSYM
 
