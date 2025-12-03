@@ -45,51 +45,109 @@ constexpr int kInfinity = std::numeric_limits<int>::max();
 constexpr int kScatterTag = 1;
 constexpr int kGatherTag = 2;
 
+/**
+ * @brief Matrice dense en stockage ligne-major (row-major).
+ *
+ * Cette classe représente une matrice de dimensions @f$ m\_rows \times m\_columns @f$
+ * stockée dans un seul buffer contigu (std::vector<int>) en ordre ligne-major.
+ * L'accès aux éléments se fait via l'opérateur ().
+ */
 class Matrix {
 private:
   std::size_t m_rows, m_columns;
   std::vector<int> m_buffer;
 
 public:
+  /**
+   * @brief Construit une matrice de taille n x m.
+   *
+   * Les éléments ne sont pas initialisés à une valeur particulière
+   * (le std::vector est simplement alloué).
+   *
+   * @param n Nombre de lignes.
+   * @param m Nombre de colonnes.
+   */
   Matrix(std::size_t n, std::size_t m) : m_rows(n), m_columns(m), m_buffer(n*m)
   {}
 
+  /**
+   * @brief Accès en écriture à l'élément (i, j) (version non-const).
+   *
+   * @param i Indice de ligne (0 ≤ i < rows()).
+   * @param j Indice de colonne (0 ≤ j < cols()).
+   * @return Référence modifiable sur l'élément (i, j).
+   */
   int&
   operator()(std::size_t i, std::size_t j)
   {
     return m_buffer[i*m_columns+j];
   }
 
+   /**
+   * @brief Accès en lecture à l'élément (i, j) (version const).
+   *
+   * @param i Indice de ligne (0 ≤ i < rows()).
+   * @param j Indice de colonne (0 ≤ j < cols()).
+   * @return Valeur de l'élément (i, j).
+   */
   int
   operator()(std::size_t i, std::size_t j) const
   {
     return m_buffer[i*m_columns+j];
   }
 
+  /**
+   * @brief Renvoie le nombre de lignes de la matrice.
+   *
+   * @return Nombre de lignes.
+   */
   std::size_t
   rows() const
   {
     return m_rows;
   }
 
+  /**
+   * @brief Renvoie le nombre de colonnes de la matrice.
+   *
+   * @return Nombre de colonnes.
+   */
   std::size_t
   cols() const
   {
     return m_columns;
   }
 
+  /**
+   * @brief Renvoie le nombre total d'éléments de la matrice.
+   *
+   * Équivaut à rows() * cols().
+   *
+   * @return Taille logique du buffer (nombre d'éléments).
+   */
   std::size_t
   size() const
   {
     return m_rows * m_columns;
   }
 
+  /**
+   * @brief Accès au buffer sous-jacent (version non-const).
+   *
+   * @return Pointeur brut sur les données internes.
+   */
   int *
   data()
   {
     return m_buffer.data();
   }
 
+  /**
+   * @brief Accès au buffer sous-jacent (version const).
+   *
+   * @return Pointeur brut constant sur les données internes.
+   */
+  
   const int *
   data() const
   {
@@ -97,6 +155,17 @@ public:
   }
 };
 
+/**
+ * @brief Affiche la matrice sur un flux de sortie.
+ *
+ * Les éléments sont séparés par des espaces et chaque ligne est terminée
+ * par un saut de ligne. Les valeurs égales à kInfinity sont affichées
+ * sous forme du symbole "∞".
+ *
+ * @param s Flux de sortie (std::ostream).
+ * @param M Matrice à afficher.
+ * @return Référence sur le flux de sortie (pour chaînage).
+ */
 std::ostream& operator<<(std::ostream& s, const Matrix& M) {
   for (std::size_t i = 0; i < M.rows(); ++i) {
     for (std::size_t j = 0; j < M.cols(); ++j) {
@@ -149,7 +218,7 @@ static long long compute_cost_local(int n,
  *  - D_global est la matrice n×n sur le rang 0 (en ligne-major)
  *  - Sur les autres rangs, D_global peut être nullptr
  *  - L'algorithme distribue les lignes de D entre les processus,
- *    réplique les médoïdes sur tous, et utilise des MPI_Reduce/Allreduce
+ *    réplique les médoïdes sur tous, et utilise des MPI_Allreduce
  *
  * @param n nombre de sommets
  * @param D_global matrice de distances sur le rang 0 (peut être modifiée ou non)
@@ -509,29 +578,27 @@ main(int argc, char **argv)
   int* mat_adj = nullptr;          // matrice d'adjacence (rang 0)
   std::vector<std::string> sequences; // pour afficher les ARN (rang 0)
   int seq_length = 0;
-  int n_int = 0;          // <--- pour MPI
 
   if (pid == root) {
     sequences = lire_sequences(input, 0);
-        n_int = (int)sequences.size();
+        n =sequences.size();
 
-        if (n_int == 0) {
+        if (n == 0) {
             std::cerr << "Aucune sequence lue. Abandon." << std::endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
         seq_length = sequences[0].size();
-        std::cout << "Nombre de sequences : " << n_int << std::endl;
+        std::cout << "Nombre de sequences : " << n << std::endl;
   }
   
 
-  MPI_Bcast(&n_int, 1, MPI_INT, root, cart_comm);
+  MPI_Bcast(&n, 1, MPI_INT, root, cart_comm);
   MPI_Bcast(&seq_length, 1, MPI_INT, root, cart_comm);
 
-  n = static_cast<std::size_t>(n_int);
 
   if (root == pid){
-    mat_adj = construire_matrice_adjacence_arn(sequences, n_int, epsilon);
+    mat_adj = construire_matrice_adjacence_arn(sequences, n, epsilon);
     if (!mat_adj) {
         std::cerr << "Erreur lors de la construction de la matrice d'adjacence.\n";
         MPI_Abort(MPI_COMM_WORLD, 1);
@@ -566,7 +633,7 @@ main(int argc, char **argv)
               << ") incompatible avec dims=(" << dims[0] << "," << dims[1]
               << ") et b=" << b << std::endl;
     MPI_Abort(cart_comm, 1);
-  }// dans le readme mettre ça "\nb = b/p sachant que p est la racine carré du nombre de processus ( a mettre dans le read me)"
+  }// dans le readme mettre ça "\nb = b/p sachant que p est la racine carré du nombre de processus"
 }
 
   // Division en blocs et répartition des blocs.
@@ -707,7 +774,7 @@ main(int argc, char **argv)
   
   /// PAM ///
 
-  PAMResult res = pam(n_int, A.data(), k, cart_comm);
+  PAMResult res = pam(n, A.data(), k, cart_comm);
 
   if (pid == root) {
         if (res.medoids.empty()) {
@@ -718,7 +785,7 @@ main(int argc, char **argv)
         }
 
         std::cout << "\nMedoids retenus :" << std::endl;
-    for (int idx = 0; idx < (int)res.medoids.size(); ++idx) {
+    for (std::size_t idx = 0; idx < res.medoids.size(); ++idx) {
         int m = res.medoids[idx];
         std::cout << "  Medoid " << idx << " ->"
              << " (ARN : " << m << ")";
@@ -727,7 +794,7 @@ main(int argc, char **argv)
 
     // Affichage des clusters 
 
-    if (res.assignment.size() == (size_t)n_int) {
+    if (res.assignment.size() == n) {
         std::cout << "\nPartitions (clusters) :" << std::endl;
         for (int c = 0; c < k; ++c) {
             int med = res.medoids[c];

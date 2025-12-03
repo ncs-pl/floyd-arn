@@ -23,10 +23,10 @@ floyd: floyd.cpp
 	  -pedantic  \
 	  -I/opt/homebrew/include \
 	  -L/opt/homebrew/lib \
-	  -lcgraph \
 	  -O3 \
-	  -o floyd   \
-	   floyd.cpp
+	  floyd.cpp \
+	  -lcgraph \
+	  -o floyd
 
 arn: arn.cpp
 	mpicxx       \
@@ -36,10 +36,10 @@ arn: arn.cpp
 	  -pedantic  \
 	  -I/opt/homebrew/include \
 	  -L/opt/homebrew/lib \
-	  -lcgraph \
 	  -O3 \
 	  -g \
-	  -fsanitize=address \
+	  arn.cpp \
 	  -o arn   \
-	   arn.cpp
+	  -lcgraph 
+	   
 

@@ -1,0 +1,45 @@
+graph G {
+    A [label="A"];
+    B [label="B"];
+    C [label="C"];
+    D [label="D"];
+    E [label="E"];
+    F [label="F"];
+    G [label="G"];
+    H [label="H"];
+    I [label="I"];
+    J [label="J"];
+    K [label="K"];
+    L [label="L"];
+    M [label="M"];
+    N [label="N"];
+    O [label="O"];
+    P [label="P"];
+    Q [label="Q"];
+    R [label="R"];
+    S [label="S"];
+    T [label="T"];
+
+    A -- B [label="1", weight=1];
+    A -- T [label="1", weight=1];
+    B -- C [label="2", weight=2];
+    C -- K [label="3", weight=3];
+    C -- P [label="2", weight=2];
+    D -- E [label="4", weight=4];
+    D -- G [label="8", weight=8];
+    D -- L [label="3", weight=3];
+    E -- F [label="7", weight=7];
+    E -- M [label="7", weight=7];
+    E -- T [label="4", weight=4];
+    F -- H [label="1", weight=1];
+    G -- I [label="4", weight=4];
+    G -- J [label="3", weight=3];
+    G -- Q [label="8", weight=8];
+    H -- K [label="3", weight=3];
+    H -- O [label="1", weight=1];
+    I -- N [label="4", weight=4];
+    J -- R [label="3", weight=3];
+    K -- R [label="3", weight=3];
+    L -- R [label="3", weight=3];
+    S -- L [label="3", weight=3];
+}
