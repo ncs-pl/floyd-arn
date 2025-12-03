@@ -731,7 +731,6 @@ main(int argc, char **argv)
         std::cout << "\nPartitions (clusters) :" << std::endl;
         for (int c = 0; c < k; ++c) {
             int med = res.medoids[c];
-            if (c == 0) std::cout << "\n"<< std::endl;
             std::cout << "Cluster " << c
                  << " (ARN #" << med << ") : \n";
 
