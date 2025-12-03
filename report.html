@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<!--
+Copyright (C) 2025 Nicolas Paul <nicolas.paul1@etu.univ-orleans.fr> and
+Tolunay Akkaya <tolunay.akkaya@etu.univ-orleans.fr>.
+
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+A copy of the license is included in the section entitled "GNU
+Free Documentation License".
+-->
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floyd, k-mémoïdes et application aux séquences d’ARN</title>
+
+<style>
+body {
+  max-width: 50em;
+  margin: auto;
+  font-weight: 400;
+  font-size: 1em;
+  font-family: "Times New Roman", "Times", serif;
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+header {
+  text-align: center;
+}
+
+.authors {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: center;
+  gap: 2em;
+}
+
+h1 {
+  text-transform: uppercase;
+  font-size: 1.8em;
+  font-weight: 600;
+  letter-spacing: -1.5%;
+}
+
+h2 {
+  font-size: 1.3em;
+  font-weight: 600;
+  letter-spacing: -1.5%;
+  margin-top: 1.3em;
+  margin-bottom: 0.3em;
+}
+
+p {
+  line-height: 1.5;
+  letter-spacing: -1.3%;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 1em 0;
+  margin: 2em auto;
+  width: auto;
+  page-break-inside: auto;
+}
+
+th, td {
+  padding: 0.5em 1em;
+  text-align: left;
+  vertical-align: top;
+}
+
+caption {
+  caption-side: bottom;
+  text-align: center;
+  margin-top: 0.5em;
+  font-weight: bold;
+}
+
+@media print {
+@page { size: A4; margin: 2.5cm; }
+
+body {
+  font-size: 11pt;
+  line-height: 1.4;
+  color: #000;
+  background: none;
+  margin: 1cm;
+  text-align: justify;
+}
+.authors { font-size: 9pt; }
+h1 { font-size: 16pt; font-weight: bold; page-break-after: avoid; }
+h2 { font-size: 14pt; font-weight: bold; page-break-after: avoid; }
+p { margin: 0 0 0.5em 0; }
+a { text-decoration: none; color: #000; }
+table { page-break-inside: auto; border-collapse: collapse; width: 100%; }
+tr { page-break-inside: avoid; page-break-after: auto; }
+code { font-size: 10pt; font-family: monospace; }
+table {
+  border-collapse: separate;
+  border-spacing: 1em 0;
+  margin: 1cm auto;
+  width: auto;
+  page-break-inside: auto;
+}
+
+th, td {
+  padding: 0.5ch 1ch;
+  text-align: left;
+  vertical-align: top;
+}
+
+caption {
+  caption-side: bottom;
+  text-align: center;
+  margin-top: 0.5em;
+  font-weight: bold;
+}
+}
+</style>
+
+<header>
+<h1>
+Floyd, <math><mi>k</mi></math>-mémoïdes et application aux séquences d’ARN :
+rapport de projet
+</h1>
+
+<p>
+Mercredi 3 décembre 2025
+
+<div class="authors">
+<p>
+AKKAYA Tolunay<br>
+<code><a href="mail:tolunay.akkaya@etu.univ-orleans.fr">tolunay.akkaya@etu.univ-orleans.fr</a></code><br>
+Université d'Orléans
+
+<p>PAUL Nicolas<br>
+<code><a href="mail:nicolas.paul1@etu.univ-orleans.fr">nicolas.paul1@etu.univ-orleans.fr</a></code><br>
+Université d'Orléans
+</div>
+</header>
+
+<main>
+<h2 id="introduction">Introduction</h2>
+
+<p>
+Ce rapport présente le détail d'un travail réalisé dans le cadre du cours
+de Programmation parallèle à l'Université d'Orléans.  Le projet porte sur
+l'implantation d'algorithmes distribués appliqués sur des séquences d'acide
+ribonucléique (ARN) utilisant la bibliothèque Open MPI (Grabriel, 2004) et le
+langage C++ (ISO/IEC, 2011), en particulier, l'algorithme de Floyd-Warshall
+(Floyd, 1962) et l'algorithme Partitioning Around Medoids (PAM) (Kaufman, 1990).
+
+<p>
+Ce document commence donc par présenter notre travail d'implantation et nos
+méthodes d'analyses, pour ensuite illustrer et discuter les différents
+résultats et finir sur une conclusion du projet.
+
+<h2 id="methodologie">Méthodologie</h2>
+
+<p>
+La méthodologie présentée dans cette section décrit les différentes approches
+techniques que nous avons mises en œuvre pour paralléliser les algorithmes
+et analyser leur performance.  Nous détaillons tout d'abord l'implantation de
+l'algorithme de Floyd-Warshall et sa construction à partir d'une topologie
+cartésienne.  Nous présentons ensuite la méthode de parallélisation utilisée
+pour l'algorithme PAM.  Enfin, nous explications la construction du graphe
+issu du séquençage ARN et de sa matrice adjacente.
+
+<p>
+Pour paralléliser l'algorithme de Floyd-Warshall, nous avons adopté une
+décomposition en blocs de la matrice de distances combinée à une topologie
+cartésienne bidimensionnelle en MPI.  La matrice <math><mi>A</mi></math> de
+taille <math><mrow><mi>n</mi><mo>×</mo><mi>n</mi></mrow></math> est découpée
+en blocs carrés <math><mrow><mi>b</mi><mo>×</mo><mi>b</mi></mrow></math>,
+chacun étant attribué à un processus au sein d'un communicateur cartésien 2D à
+partir duquel sont dérivés deux sous-communicateurs, l’un pour les lignes et
+l'autre pour les colonnes.  À chaque itération associée à une valeur
+intermédiaire <math><mi>k</mi></math>, les processus doivent obtenir les
+données nécessaires : dans chaque ligne, le processus possédant le bloc
+contenant la colonne <math><mi>k</mi></math> diffuse celui-ci via un
+<code>MPI_Bcast</code>, tandis que dans chaque colonne, le processus détenant
+le bloc de la ligne <math><mi>k</mi></math> effectue une diffusion équivalente.
+Après réception de ces blocs, chaque processus met à jour son bloc local
+sans autre synchronisation.  Une fois toutes les itérations terminées,
+l'ensemble des blocs mis à jour est rassemblé pour reconstruire la matrice
+finale des plus courtes distances.
+
+<p>
+Pour l'implémentation de l'algorithme Partitioning Around Medoids (PAM), nous
+avons défini une structure dédiée permettant de stocker les médoïdes
+sélectionnés ainsi que les clusters qui leur sont associés.  Le calcul du coût
+repose sur une fonction <code>compute_cost_local</code>, qui évalue la
+contribution locale d’un ensemble de médoïdes à partir des lignes de la matrice
+des distances.  Afin de paralléliser cette étape, nous distribuons les lignes
+de la matrice entre les différents processus MPI : chacun calcule donc le coût
+local associé à un échange potentiel entre un médoïde et un nœud candidat.
+Une opération <code>MPI_AllReduce</code> est ensuite utilisée pour obtenir le
+coût global de chaque échange.  À partir de ces coûts, les processus
+déterminent quels médoïdes doivent être retenus pour l’itération suivante.
+
+<p>
+Pour la construction du graphe à partir des données de séquences ARN, nous
+avons développé plusieurs fonctions dédiées.  La fonction
+<code>lire_sequences</code> permet d’extraire l’ensemble des séquences
+présentes dans un fichier structuré donné en entrée.  La comparaison entre
+deux séquences est effectuée par la fonction
+<code>hamming_distance_cutoff_raw</code>, qui calcule la distance de Hamming
+tout en appliquant un seuil prédéfini afin de déterminer si deux séquences
+doivent être considérées comme adjacentes dans le graphe.  Enfin, la fonction
+<code>construire_matrice_adjacence_arn</code> utilise ces deux outils pour
+générer la matrice d’adjacence complète.
+
+<p>
+Pour analyser les performances de nos implémentations, nous avons effectué des
+mesures systématiques en répétant chaque exécution une dizaine de fois, puis
+en calculant la moyenne des temps observés afin de réduire l’impact des
+fluctuations liées au système.  Les mesures temporelles reposent sur la
+commande UNIX <code>time</code>, dont nous avons retenu la valeur de <em>real
+time</em>, correspondant au temps total écoulé durant l'exécution parallèle.
+L'ensemble des tests a été réalisé sur les machines du laboratoire (salle E11),
+servant de référence commune : chaque nœud est équipé d’un processeur Intel
+Core i7-10700 à 2,90 GHz, comportant 8 cœurs physiques et 16 threads, et
+fonctionne sous Linux 5.15.0 avec Ubuntu 22.04.1 LTS.  Les codes sources ont
+été compilés avec le G++ Compiler en version 11.2.0.  Dans un premier temps,
+nous avons évalué les performances en exploitant les 16 threads disponibles sur
+une seule machine, puis nous avons étendu les expérimentations à une grappe de
+quatre machines interconnectées avec TCP (Eddy, 2022), pour un total de 64
+cœurs.
+
+<h2 id="resultats">Résultats</h2>
+
+<p>
+Dans cette section, nous présentons les performances de notre implémentation
+parallèle appliquée aux données de séquences ARN, en évaluant notamment
+l'impact des paramètres <math><mi>&epsilon;</mi></math> (seuil de similarité)
+et <math><mi>k</mi></math> (nombre de médoïdes).  Nous analysons comment la
+variation de ces paramètres influence la vitesse de calcul du programme,
+permettant d'identifier les configurations offrant de meilleurs comproomis
+entre temps d'exécution et qualité des clusters.
+
+<table>
+  <thead>
+    <tr>
+      <th><math><mi>&epsilon;</mi></math></th>
+      <th><math><mi>k</mi></math></th>
+      <th><math><mrow><mi>np</mi><mo>=</mo><mn>4</mn></mrow></math> (secondes)</th>
+      <th><math><mrow><mi>np</mi><mo>=</mo><mn>16</mn></mrow></math> (secondes)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>50</td>
+      <td>4</td>
+      <td>9,581</td>
+      <td>10,451</td>
+    </tr>
+    <tr>
+      <td>70</td>
+      <td>4</td>
+      <td>11,518</td>
+      <td>13,095</td>
+    </tr>
+    <tr>
+      <td>90</td>
+      <td>4</td>
+      <td>11,370</td>
+      <td>12,994</td>
+    </tr>
+  </tbody>
+
+  <caption>
+    <strong>Fig. 1</strong> Évolution du temps d'exécution en variant
+    <math><mi>&epsilon;</mi></math>.
+  </caption>
+</table>
+
+<p>
+Pour analyser l'impact des paramètres sur les performances, nous avons fait
+varier le seuil de similarité afin d’observer l'évolution du temps d'exécution,
+comme illustré à la <strong>Fig. 1</strong>.  De manière analogue, nous avons
+étudié l’influence du nombre de médoïdes, présentée à la <strong>Fig.
+2</strong>.  Dans les deux cas, on constate que le temps d'exécution augmente
+avec la valeur du paramètre considéré, montrant une tendance ascendante :
+plus <math><mi>&epsilon;</mi></math> ou <math><mi>k</mi></math> est élevé, plus
+le programme nécessite de temps pour effectuer les calculs et construire les
+clusters correspondants.
+
+<table>
+  <thead>
+    <tr>
+      <th><math><mi>&epsilon;</mi></math></th>
+      <th><math><mi>k</mi></math></th>
+      <th><math><mrow><mi>np</mi><mo>=</mo><mn>4</mn></mrow></math> (secondes)</th>
+      <th><math><mrow><mi>np</mi><mo>=</mo><mn>16</mn></mrow></math> (secondes)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>70</td>
+      <td>3</td>
+      <td>11,339</td>
+      <td>12,985</td>
+    </tr>
+    <tr>
+      <td>70</td>
+      <td>5</td>
+      <td>11,648</td>
+      <td>13,487</td>
+    </tr>
+    <tr>
+      <td>70</td>
+      <td>7</td>
+      <td>12,033</td>
+      <td>14,331</td>
+    </tr>
+  </tbody>
+
+  <caption>
+    <strong>Fig. 2</strong> Évolution du temps d'exécution en variant
+    <math><mi>k</mi></math>.
+  </caption>
+</table>
+
+<p>
+Il n'a pas été possible d'effectuer des exécutions au-delà de
+<math><mrow><mi>np</mi><mo>=</mo><mn>16</mn></mrow></math> sur la grappe de
+machines du laboratoire.  En effet, les communications entre nœuds via TCP se
+sont révélées instables et peu reproductibles : certaines exécutions
+entraînaient des crashs inexpliqués, bien que de manière sporadique.
+Ces interruptions étaient liées au runtime d’Open MPI, qui ne parvenait pas à
+gérer correctement certaines situations de communication distribuée sur ce
+réseau.  Nous avons donc limité les expérimentations à des configurations
+stables, évitant ainsi de fausser les temps d’exécution rapportés.
+
+<p>
+En conclusion, nos observations montrent que les paramètres
+<math><mi>&epsilon;</mi></math> et <math><mi>k</mi></math> ont un impact direct
+sur le temps d'exécution du programme parallèle, même si, dans le cadre de nos
+expérimentations, ces variations restent de l'ordre de quelques secondes.
+Toutefois, nous supposons que sur des jeux de données beaucoup plus volumineux,
+ces différences deviendraient beaucoup plus marquées, soulignant l'importance
+du choix judicieux des paramètres afin optimiser l'efficacité des algorithmes
+parallèles.
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>
+Ce projet de programmation parallèle a permis d'explorer la mise en œuvre et
+l'optimisation de deux algorithmes essentiels, Floyd-Warshall et PAM, ainsi
+que la construction de graphes à partir de séquences ARN.  Nous avons pu
+développer des versions parallèles adaptées à une architecture à mémoire
+distribuée et analyser leurs performances sur différentes configurations de
+calcul.  L'étude des paramètres, tels que le seuil
+<math><mi>&epsilon;</mi></math> et le nombre de médoïdes
+<math><mi>k</mi></math>, a montré leur influence sur les temps d'exécution et
+sur la structure des partitions obtenues.  Bien que les expérimentations aient
+été limitées par les contraintes matérielles et réseau du laboratoire, le
+projet illustre clairement les bénéfices de la parallélisation pour traiter
+des problèmes de grande échelle.
+
+<h2 id="references">Références</h2>
+
+<p>
+Gabriel, E., Fagg, G. E., Bosilca, G., Angskun, T., Dongarra, J. J.,
+Squyres, J. M., ... &amp; Woodall, T. S. (2004).
+Open MPI: Goals, concept, and design of a next generation MPI implementation.
+Dans <em>European Parallel Virtual Machine/Message Passing Interface Users’
+Group Meeting</em> (pp. 97-104).
+Berlin, Heidelberg: Springer Berlin Heidelberg.
+
+<p>
+ISO/IEC. (2011).
+ISO/IEC 14882:2011 – Information technology – Programming languages – C++.
+<em>International Organization for Standardization</em>.
+
+<p>
+Floyd, R. W. (1962).
+Algorithm 97: shortest path.
+<em>Communications of the ACM, 5</em>(6), 345-345.
+
+<p>
+Kaufman, L. (1990).
+Partitioning around medoids (program pam).
+<em>Wiley series in probability and statistics</em>, 344, 68-125.
+
+<p>
+Eddy, W. (Ed.). (2022). RFC 9293: Transmission Control Protocol (TCP).
+
+</main>
+
+<footer></footer>
+</html>
+
