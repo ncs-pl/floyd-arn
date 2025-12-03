@@ -1,6 +1,6 @@
 # Projet Floyd-ARN.
 # Copyright (C) 2025 Nicolas Paul <nicolas.paul1@etu.univ-orleans.fr> and
-# Tolunay Akkaya <akkatolunay@icloud.com>.
+# Tolunay Akkaya <akkatolunay@etu.univ-orleans.fr>.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+floyd: floyd.cpp
+	mpicxx       \
+	  -std=c++11 \
+	  -Wall      \
+	  -Wextra    \
+	  -pedantic  \
+	  -I/opt/homebrew/include \
+	  -L/opt/homebrew/lib \
+	  -lcgraph \
+	  -O3 \
+	  -o floyd   \
+	   floyd.cpp
+
 arn: arn.cpp
 	mpicxx       \
 	  -std=c++11 \
@@ -28,5 +41,5 @@ arn: arn.cpp
 	  -g \
 	  -fsanitize=address \
 	  -o arn   \
-	   arn.cpp   
+	   arn.cpp
 
