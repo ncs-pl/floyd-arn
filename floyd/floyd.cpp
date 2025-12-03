@@ -34,6 +34,7 @@
 
 #include <graphviz/cgraph.h>
 #include <mpi.h>
+#include <limits>
 
 constexpr int kInfinity = std::numeric_limits<int>::max();
 constexpr int kScatterTag = 1;
@@ -153,6 +154,8 @@ main(int argc, char **argv)
     fclose(fd);
 
     n = static_cast<std::size_t>(agnnodes(G));
+        std::cout << "Nombre de sommets lus par Graphviz : " << n << std::endl;
+
     A = Matrix(n, n);
 
     // NOTE(nico): toujours s'assurer de la construction.
@@ -312,8 +315,7 @@ main(int argc, char **argv)
       }
     }
 
-    std::cout << "Matrice des distances :" << std::endl;
-    std::cout << A << std::endl;
+
   } else {
     // TODO: non-blocking IO
     MPI_Send(D.data(),

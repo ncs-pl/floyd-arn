@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-floyd: floyd.cpp
+arn: arn.cpp
 	mpicxx       \
 	  -std=c++11 \
 	  -Wall      \
@@ -23,10 +23,10 @@ floyd: floyd.cpp
 	  -pedantic  \
 	  -I/opt/homebrew/include \
 	  -L/opt/homebrew/lib \
-	  -lcgraph   \
-	  -O3        \
+	  -lcgraph \
+	  -O3 \
 	  -g \
 	  -fsanitize=address \
-	  -o floyd   \
-	  floyd.cpp
+	  -o arn   \
+	   arn.cpp   
 

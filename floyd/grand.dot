@@ -17,6 +17,7 @@ graph G {
     P [label="P"];
     Q [label="Q"];
     R [label="R"];
+    S [label="S"];
     T [label="T"];
 
     A -- B [label="1", weight=1];
@@ -40,4 +41,5 @@ graph G {
     J -- R [label="3", weight=3];
     K -- R [label="3", weight=3];
     L -- R [label="3", weight=3];
+    K -- S [label="3", weight=3];
 }
