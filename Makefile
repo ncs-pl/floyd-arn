@@ -42,4 +42,14 @@ arn: arn.cpp
 	  -o arn   \
 	  -lcgraph 
 	   
+needleman: needleman.cpp
+	g++ \
+	  -std=c++11 \
+	  -Wall \
+	  -Wextra \
+	  -pedantic \
+	  -O3 \
+	  -fopenmp \
+	  needleman.cpp \
+	  -o needleman
 
