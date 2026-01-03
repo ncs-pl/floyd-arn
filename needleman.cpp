@@ -26,6 +26,8 @@
 #include <limits>
 #include <algorithm>
 #include <iostream>
+#include<omp.h>
+
 
 constexpr int kInfinity = std::numeric_limits<int>::max();
 
@@ -292,7 +294,8 @@ long long needleman_wunsch_score(const std::string& s1,
             // Score de substitution
             int sub = (s1[i - 1] == s2[j - 1]) ? 1 : -1;
 
-            // Match / mismatch
+            // Meilleur score
+            // Match / mismatch 
             M[i][j] = std::max({ M[i - 1][j - 1],
                                  Ix[i - 1][j - 1],
                                  Iy[i - 1][j - 1] }) + sub;
@@ -327,15 +330,38 @@ Matrix needleman_score_matrix(const std::string& filename)
   const std::size_t N = sequences.size();
   Matrix S(N, N);
 
+  // Diagonale
+  #pragma omp parallel for schedule(static)
   for (std::size_t i = 0; i < N; ++i) {
-    // Diagonale : score de la séquence avec elle-même (souvent = longueur * match)
     S(i, i) = needleman_wunsch_score(sequences[i], sequences[i]);
+  }
 
+  // Créer toutes les paires
+  std::vector<std::pair<std::size_t, std::size_t> > pairs;
+  pairs.reserve((N * (N - 1)) / 2);
+  
+  for (std::size_t i = 0; i < N; ++i) {
     for (std::size_t j = i + 1; j < N; ++j) {
-      const int sc = needleman_wunsch_score(sequences[i], sequences[j]);
-      S(i, j) = sc;
-      S(j, i) = sc; // symétrie
+      pairs.push_back(std::make_pair(i, j));
     }
+  }
+
+  // Chunk size adaptatif
+  int num_threads = omp_get_max_threads();
+  std::size_t chunk_size = std::max(1UL, pairs.size() / (num_threads * 50));
+
+  std::cout << "Calcul de " << pairs.size() << " paires avec " 
+            << num_threads << " threads (chunk=" << chunk_size << ")" << std::endl;
+
+  // Paralléliser avec schedule dynamique adaptatif
+  #pragma omp parallel for schedule(dynamic, chunk_size)
+  for (std::size_t idx = 0; idx < pairs.size(); ++idx) {
+    std::size_t i = pairs[idx].first;
+    std::size_t j = pairs[idx].second;
+    
+    const long long sc = needleman_wunsch_score(sequences[i], sequences[j]);
+    S(i, j) = sc;
+    S(j, i) = sc;
   }
 
   return S;
@@ -352,6 +378,11 @@ int main(int argc, char** argv)
   const std::string filename = argv[1];
 
   try {
+    std::cout << "Configuration OpenMP" << std::endl;
+    std::cout << "Nombre de processeurs détectés : " << omp_get_num_procs() << std::endl;
+    std::cout << "Nombre de threads qui seront utilisés : " << omp_get_max_threads() << std::endl;
+    std::cout << std::endl;
+
     Matrix S = needleman_score_matrix(filename);
 
     std::cout << "Matrice des scores Needleman-Wunsch (" 
