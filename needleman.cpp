@@ -248,21 +248,22 @@ std::vector<std::string> lire_sequences(const std::string& filename, int seq_len
 int
 needleman_wunsch(const std::string& u, const std::string& v)
 {
-  int n = u.size();
-  Matrix F(n+1, n+1);
-  for(int i = 0; i<=n;i++) F(i, 0) = -3*i;
-  for(int i = 0; i<=n;i++) F(0, i) = -3*i;
+  std::size_t n = u.size() + 1;
+  std::size_t m = v.size() + 1;
+  Matrix F(n, m);
+  for(std::size_t i = 0; i<n;i++) F(i, 0) = -3*i;
+  for(std::size_t i = 0; i<m;i++) F(0, i) = -3*i;
 
-  for(int i = 1; i<=n; i++) {
-    for(int j = 1; j<=n; j++) {
-      int c1 = F(i-1, j-1) + (u[i] == v[j] ? 1 : -1);
-      int c2 = F(i-1, j) -3;
-      int c3 = F(i, j-1) -3;
-      F(i, j) = std::max({ c1, c2, c3 });
+  for(std::size_t i = 1; i<n; i++) {
+    for(std::size_t j = 1; j<m; j++) {
+      int match = F(i-1, j-1) + (u[i-1] == v[j-1] ? 1 : -1);
+      int deletion = F(i-1, j) -3;
+      int insertion = F(i, j-1) -3;
+      F(i, j) = std::max({ match, deletion, insertion });
     }
   }
 
-  return F(n,n);
+  return F(n-1,m-1);
 }
 
 int
@@ -279,7 +280,8 @@ main(int argc, char **argv)
 
   #pragma omp parallel for schedule(dynamic, 1) 
   for (std::size_t i = 0; i < seq.size(); ++i) {
-    for (std::size_t j = 0; j < seq.size(); j++) {
+    S(i,i) = needleman_wunsch(seq[i], seq[i]);
+    for (std::size_t j = i +1 ; j < seq.size(); j++) {
       S(i, j) = S(j, i) = needleman_wunsch(seq[i], seq[j]);
     }
   }
