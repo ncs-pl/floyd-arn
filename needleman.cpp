@@ -31,7 +31,6 @@
 
 constexpr int kInfinity = std::numeric_limits<int>::max();
 
-
 /**
  * @brief Matrice dense en stockage ligne-major (row-major).
  *
@@ -134,7 +133,6 @@ public:
    *
    * @return Pointeur brut constant sur les données internes.
    */
-  
   const int *
   data() const
   {
@@ -234,141 +232,41 @@ std::vector<std::string> lire_sequences(const std::string& filename, int seq_len
 
 /**
  * @brief Calcule le score d’alignement global entre deux séquences
- *        avec l’algorithme de Needleman–Wunsch (pénalités affines).
+ *        avec l’algorithme de Needleman–Wunsch.
  *
  * Schéma de score :
  *  - match      : +1
  *  - mismatch   : -1
  *  - ouverture de gap : gap_open
- *  - extension de gap : gap_extend
  *
- * On ne reconstruit PAS l’alignement, on calcule uniquement le score optimal.
+ * On ne reconstruit pas l’alignement, on calcule uniquement le score optimal.
  *
- * @param s1 Première séquence
- * @param s2 Deuxième séquence
- * @param gap_open Pénalité d’ouverture de gap (ex : -3)
- * @param gap_extend Pénalité d’extension de gap (ex : -1)
+ * @param u Première séquence
+ * @param v Deuxième séquence
  * @return Score d’alignement global optimal
  */
-long long needleman_wunsch_score(const std::string& s1,
-                                 const std::string& s2,
-                                 int gap_open = -3,
-                                 int gap_extend = -1)
+int
+needleman_wunsch(const std::string& u, const std::string& v)
 {
-    const int n = static_cast<int>(s1.size());
-    const int m = static_cast<int>(s2.size());
+  int n = u.size();
+  Matrix F(n+1, n+1);
+  for(int i = 0; i<=n;i++) F(i, 0) = -3*i;
+  for(int i = 0; i<=n;i++) F(0, i) = -3*i;
 
-    // Valeur représentant -inf
-    const long long NEG_INF = std::numeric_limits<long long>::min() / 4;
-
-    // M  : fin par match / mismatch
-    // Ix : fin par gap dans s2
-    // Iy : fin par gap dans s1
-    std::vector<std::vector<long long>> M(n + 1, std::vector<long long>(m + 1, NEG_INF));
-    std::vector<std::vector<long long>> Ix(n + 1, std::vector<long long>(m + 1, NEG_INF));
-    std::vector<std::vector<long long>> Iy(n + 1, std::vector<long long>(m + 1, NEG_INF));
-
-    // Initialisation
-    M[0][0] = 0;
-
-    // Première colonne : gaps dans s2
-    for (int i = 1; i <= n; ++i) {
-        if (i == 1)
-            Ix[i][0] = gap_open;
-        else
-            Ix[i][0] = Ix[i - 1][0] + gap_extend;
+  for(int i = 1; i<=n; i++) {
+    for(int j = 1; j<=n; j++) {
+      int c1 = F(i-1, j-1) + (u[i] == v[j] ? 1 : -1);
+      int c2 = F(i-1, j) -3;
+      int c3 = F(i, j-1) -3;
+      F(i, j) = std::max({ c1, c2, c3 });
     }
+  }
 
-    // Première ligne : gaps dans s1
-    for (int j = 1; j <= m; ++j) {
-        if (j == 1)
-            Iy[0][j] = gap_open;
-        else
-            Iy[0][j] = Iy[0][j - 1] + gap_extend;
-    }
-
-    // Remplissage des matrices
-    for (int i = 1; i <= n; ++i) {
-        for (int j = 1; j <= m; ++j) {
-
-            // Score de substitution
-            int sub = (s1[i - 1] == s2[j - 1]) ? 1 : -1;
-
-            // Meilleur score
-            // Match / mismatch 
-            M[i][j] = std::max({ M[i - 1][j - 1],
-                                 Ix[i - 1][j - 1],
-                                 Iy[i - 1][j - 1] }) + sub;
-
-            // Gap dans s2
-            Ix[i][j] = std::max({ M[i - 1][j]  + gap_open,
-                                  Iy[i - 1][j] + gap_open,
-                                  Ix[i - 1][j] + gap_extend });
-
-            // Gap dans s1
-            Iy[i][j] = std::max({ M[i][j - 1]  + gap_open,
-                                  Ix[i][j - 1] + gap_open,
-                                  Iy[i][j - 1] + gap_extend });
-        }
-    }
-
-    // Score final
-    return std::max({ M[n][m], Ix[n][m], Iy[n][m] });
+  return F(n,n);
 }
 
-/**
- * @brief Construit la matrice des scores Needleman–Wunsch pour toutes les séquences.
- *
- * La matrice est symétrique : score(i,j) = score(j,i).
- *
- * @param filename Fichier contenant les séquences.
- * @return Matrix NxN contenant les scores d'alignement global.
- */
-Matrix needleman_score_matrix(const std::string& filename)
-{
-  std::vector<std::string> sequences = lire_sequences(filename);
-  const std::size_t N = sequences.size();
-  Matrix S(N, N);
-
-  // Diagonale
-  #pragma omp parallel for schedule(static)
-  for (std::size_t i = 0; i < N; ++i) {
-    S(i, i) = needleman_wunsch_score(sequences[i], sequences[i]);
-  }
-
-  // Créer toutes les paires
-  std::vector<std::pair<std::size_t, std::size_t> > pairs;
-  pairs.reserve((N * (N - 1)) / 2);
-  
-  for (std::size_t i = 0; i < N; ++i) {
-    for (std::size_t j = i + 1; j < N; ++j) {
-      pairs.push_back(std::make_pair(i, j));
-    }
-  }
-
-  // Chunk size adaptatif
-  int num_threads = omp_get_max_threads();
-  std::size_t chunk_size = std::max(1UL, pairs.size() / (num_threads * 50));
-
-  std::cout << "Calcul de " << pairs.size() << " paires avec " 
-            << num_threads << " threads (chunk=" << chunk_size << ")" << std::endl;
-
-  // Paralléliser avec schedule dynamique adaptatif
-  #pragma omp parallel for schedule(dynamic, chunk_size)
-  for (std::size_t idx = 0; idx < pairs.size(); ++idx) {
-    std::size_t i = pairs[idx].first;
-    std::size_t j = pairs[idx].second;
-    
-    const long long sc = needleman_wunsch_score(sequences[i], sequences[j]);
-    S(i, j) = sc;
-    S(j, i) = sc;
-  }
-
-  return S;
-}
-
-
-int main(int argc, char** argv)
+int
+main(int argc, char **argv)
 {
   if (argc != 2) {
     std::cerr << "Usage: " << argv[0] << " <fichier_sequences>\n";
@@ -376,23 +274,16 @@ int main(int argc, char** argv)
   }
 
   const std::string filename = argv[1];
+  std::vector<std::string> seq = lire_sequences(filename);
+  Matrix S(seq.size(), seq.size());
 
-  try {
-    std::cout << "Configuration OpenMP" << std::endl;
-    std::cout << "Nombre de processeurs détectés : " << omp_get_num_procs() << std::endl;
-    std::cout << "Nombre de threads qui seront utilisés : " << omp_get_max_threads() << std::endl;
-    std::cout << std::endl;
-
-    Matrix S = needleman_score_matrix(filename);
-
-    std::cout << "Matrice des scores Needleman-Wunsch (" 
-              << S.rows() << " x " << S.cols() << ")\n";
-    std::cout << S << std::endl;   
-  }
-  catch (const std::exception& e) {
-    std::cerr << "Erreur: " << e.what() << "\n";
-    return 2;
+  #pragma omp parallel for schedule(dynamic, 1) 
+  for (std::size_t i = 0; i < seq.size(); ++i) {
+    for (std::size_t j = 0; j < seq.size(); j++) {
+      S(i, j) = S(j, i) = needleman_wunsch(seq[i], seq[j]);
+    }
   }
 
+  std::cout << "Matrice des scores Needleman-Wunsch\n" << S << std::endl;
   return 0;
 }
