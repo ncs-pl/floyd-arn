@@ -240,7 +240,7 @@ PAMResult pam(int n, int* D_global, int k, MPI_Comm comm){
 
     if (k <= 0 || k > n) {
         if (rank == 0) {
-            std::cerr << "Erreur : k invalide dans pam_mpi." << std::endl;
+            std::cerr << "Erreur : k invalide dans pam." << std::endl;
         }
         return result;
     }
@@ -249,7 +249,7 @@ PAMResult pam(int n, int* D_global, int k, MPI_Comm comm){
         if (rank == 0) {
             std::cerr << "Erreur : n (" << n
                       << ") n'est pas divisible par le nombre de processus ("
-                      << size << ") dans pam_mpi." << std::endl;
+                      << size << ") dans pam." << std::endl;
         }
         MPI_Abort(comm, 1);
     }
@@ -727,7 +727,7 @@ main(int argc, char **argv)
 
   if (pid == root) {
         if (res.medoids.empty()) {
-            std::cerr << "Erreur : pam_mpi a echoue ou retourne un resultat vide."
+            std::cerr << "Erreur : pam a echoue ou retourne un resultat vide."
                       << std::endl;
             MPI_Finalize();
             return EXIT_FAILURE;

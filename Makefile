@@ -53,3 +53,18 @@ needleman: needleman.cpp
 	  needleman.cpp \
 	  -o needleman
 
+
+arn2: arn2.cpp
+	mpicxx       \
+	  -std=c++11 \
+	  -Wall      \
+	  -Wextra    \
+	  -pedantic  \
+	  -I/opt/homebrew/include \
+	  -L/opt/homebrew/lib \
+	  -O3 \
+	  -fopenmp \
+	  -g \
+	  arn2.cpp \
+	  -o arn2   \
+	  -lcgraph
