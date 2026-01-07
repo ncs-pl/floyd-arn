@@ -17,12 +17,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Ce fichier propose une parallélisation de l'algorithme de Floyd-Warshall
-// en utilisant OpenMPI 5+ et ISO C++ 11.
+// en utilisant OpenMPI 5+, OpenMP 4.0 et ISO C++ 11.
 
-// mpirun -np np ./arn root b input epsilon k
-// mpirun -np 4 ./arn 0 50 dataset_100seq.fa 70 4
-// mpirun -np 4 ./arn 0 250 dataset_500seq.fa 70 4
-// mpirun -np 16 ./arn 0 1000 dataset_2000seq.fa 70 4
+// mpirun -np np ./arn root b input  k
+// mpirun -np 4 ./arn 0 50 dataset_100seq.fa  4
+// mpirun -np 4 ./arn 0 250 dataset_500seq.fa  4
+// mpirun -np 4 ./arn 0 1000 dataset_2000seq.fa  4
 
 #include <algorithm>
 #include <array>
@@ -454,13 +454,6 @@ std::vector<std::string> lire_sequences(const std::string& filename, int seq_len
 /**
  * @brief Calcule le score d’alignement global entre deux séquences
  *        avec l’algorithme de Needleman–Wunsch.
- *
- * Schéma de score :
- *  - match      : +1
- *  - mismatch   : -1
- *  - ouverture de gap : gap_open
- *
- * On ne reconstruit pas l’alignement, on calcule uniquement le score optimal.
  *
  * @param u Première séquence
  * @param v Deuxième séquence

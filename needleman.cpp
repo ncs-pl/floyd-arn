@@ -17,7 +17,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // Ce fichier propose une parallélisation de l'algorithme de Needleman-Wunsch
-// en utilisant OpenMP ? et ISO C++ 11.
+// en utilisant OpenMP 4.0 et ISO C++ 11.
 
 
 #include <vector>
@@ -233,14 +233,7 @@ std::vector<std::string> lire_sequences(const std::string& filename, int seq_len
 /**
  * @brief Calcule le score d’alignement global entre deux séquences
  *        avec l’algorithme de Needleman–Wunsch.
- *
- * Schéma de score :
- *  - match      : +1
- *  - mismatch   : -1
- *  - ouverture de gap : gap_open
- *
- * On ne reconstruit pas l’alignement, on calcule uniquement le score optimal.
- *
+ * 
  * @param u Première séquence
  * @param v Deuxième séquence
  * @return Score d’alignement global optimal
