@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<!--
+Copyright (C) 2025 Nicolas Paul <nicolas.paul1@etu.univ-orleans.fr> and
+Tolunay Akkaya <tolunay.akkaya@etu.univ-orleans.fr>.
+
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+A copy of the license is included in the section entitled "GNU
+Free Documentation License".
+-->
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alignement, score par l’algorithme de Needleman-Wunsch</title>
+
+<style>
+body {
+  max-width: 50em;
+  margin: auto;
+  font-weight: 400;
+  font-size: 1em;
+  font-family: "Times New Roman", "Times", serif;
+  background-color: #FFFFFF;
+  color: #000000;
+}
+
+header {
+  text-align: center;
+}
+
+.authors {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: center;
+  gap: 2em;
+}
+
+h1 {
+  text-transform: uppercase;
+  font-size: 1.8em;
+  font-weight: 600;
+  letter-spacing: -1.5%;
+}
+
+h2 {
+  font-size: 1.3em;
+  font-weight: 600;
+  letter-spacing: -1.5%;
+  margin-top: 1.3em;
+  margin-bottom: 0.3em;
+}
+
+p {
+  line-height: 1.5;
+  letter-spacing: -1.3%;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 1em 0;
+  margin: 2em auto;
+  width: auto;
+  page-break-inside: auto;
+}
+
+th, td {
+  padding: 0.5em 1em;
+  text-align: left;
+  vertical-align: top;
+}
+
+caption {
+  caption-side: bottom;
+  text-align: center;
+  margin-top: 0.5em;
+  font-weight: bold;
+}
+
+@media print {
+@page { size: A4; margin: 2.5cm; }
+
+body {
+  font-size: 11pt;
+  line-height: 1.4;
+  color: #000;
+  background: none;
+  margin: 1cm;
+  text-align: justify;
+}
+.authors { font-size: 9pt; }
+h1 { font-size: 16pt; font-weight: bold; page-break-after: avoid; }
+h2 { font-size: 14pt; font-weight: bold; page-break-after: avoid; }
+p { margin: 0 0 0.5em 0; }
+a { text-decoration: none; color: #000; }
+table { page-break-inside: auto; border-collapse: collapse; width: 100%; }
+tr { page-break-inside: avoid; page-break-after: auto; }
+code { font-size: 10pt; font-family: monospace; }
+table {
+  border-collapse: separate;
+  border-spacing: 1em 0;
+  margin: 1cm auto;
+  width: auto;
+  page-break-inside: auto;
+}
+
+th, td {
+  padding: 0.5ch 1ch;
+  text-align: left;
+  vertical-align: top;
+}
+
+caption {
+  caption-side: bottom;
+  text-align: center;
+  margin-top: 0.5em;
+  font-weight: bold;
+}
+}
+</style>
+
+<header>
+<h1>
+Alignement, score par l’algorithme de Needleman-Wunsch
+</h1>
+
+<p>
+Mercredi 7 janvier 2026
+
+<div class="authors">
+<p>
+AKKAYA Tolunay<br>
+<code><a href="mail:tolunay.akkaya@etu.univ-orleans.fr">tolunay.akkaya@etu.univ-orleans.fr</a></code><br>
+Université d'Orléans
+
+<p>PAUL Nicolas<br>
+<code><a href="mail:nicolas.paul1@etu.univ-orleans.fr">nicolas.paul1@etu.univ-orleans.fr</a></code><br>
+Université d'Orléans
+</div>
+</header>
+
+<main>
+<h2 id="introduction">Introduction</h2>
+
+<p>
+Ce rapport présente le détail d'un travail réalisé dans le cadre du cours
+de Programmation parallèle à l'Université d'Orléans.  Le projet porte sur
+l'implantation et l'utilisation de l'algorithme de Needleman-Wunsch (Needleman, 1970)
+ainsi que sa parallélisation grâce à OpenMP (Dagum, 1998) en langage C++ (ISO/IEC, 2011).
+Ce document commence par présenter notre travail de programmation et son
+analyse avant de discuter des résultats obtenus.
+
+<h2 id="methodologie">Méthodologie</h2>
+
+<p>
+La méthodologie présentée dans cette section décrit notre approche à
+implanter l'algorithme les questions du sujet.  Nous détaillons tout
+d'abord l'implantation de l'algorithme de Needleman-Wunsch et sa
+parallélisation.  Puis, nous précisons les conditions suivies pour
+l'analyse de performance.
+
+<p>
+Pour implanter et paralléliser l'algorithme de Floyd-Warshall, nous avons
+suivi l'algorithme comme décrit sur le lien indiqué dans le sujet.  La
+parallélisation s'effectue en affectant dynamiquement à un thread disponible
+une combinaison de deux séquences. Le score obtenu pour cette combinaison
+vient remplir notre matrice qui sera l'entrée à la suite du programme
+(Floyd-Warshall, &amp;c.).  Le détail complet est disponible dans le fichier
+source <code>needleman.cpp</code> déposé avec ce rapport.
+
+<p>
+Pour analyser les performances de notre code, nous avons effectué des
+mesures systématiques en répétant chaque exécution une dizaine de fois, puis
+calculer la moyenne des temps observés afin de réduire l’impact des
+fluctuations liées au système.  Les mesures temporelles reposent sur la
+commande UNIX <code>time</code>, dont nous avons retenu la valeur de <em>real
+time</em>, correspondant au temps total écoulé durant l'exécution parallèle.
+L'ensemble des tests a été réalisé sur une machine du laboratoire (salle E11),
+servant de référence commune : un ordinateur y est équipé d’un processeur Intel
+Core i7-10700 à 2,90 GHz avec 8 cœurs physiques et 16 threads, et
+fonctionne sous Linux 5.15.0 avec Ubuntu 22.04.1 LTS.  Les codes sources ont
+été compilés avec le G++ Compiler en version 11.2.0.
+
+<h2 id="resultats">Résultats</h2>
+
+<p>
+Dans cette section, nous présentons les performances de notre implantation
+avec une parallélisation à gros grain et à grain fin sur 2000 séquences ARN.
+Nos résultats consistent à comprendre l'évolution du temps de calcul du
+programme selon le nombre de noeuds OpenMPI et de threads OpenMP avec un
+jeu de données important.
+
+<table>
+  <tbody>
+    <tr>
+      <th># noeuds</th>
+      <td>1</td>
+      <td>2</td>
+      <td>4</td>
+      <td>8</td>
+      <td>16</td>
+    </tr>
+    <tr>
+      <th># threads</th>
+      <td>16</td>
+      <td>8</td>
+      <td>4</td>
+      <td>2</td>
+      <td>1</td>
+    </tr>
+    <tr>
+      <th>temps (secondes)</th>
+      <td>78</td>
+      <td>28</td>
+      <td>11</td>
+      <td>19</td>
+      <td>25</td>
+    </tr>
+  </tbody>
+
+  <caption>
+    <strong>Fig. 1</strong> Évolution du temps d'exécution.
+  </caption>
+</table>
+
+<p>
+Nous pouvons constater que le temps le plus court est atteint
+lorsque nous distribuons équitablement les coeurs de la machine.
+À l'inverse, nous obtenons le temps le plus lent avec un
+noeud et tous les threads.  Cependant, nous gardons un temps
+« acceptable » si nous diminuons le nombre de thread
+au profit du nombre de noeuds.  Cela est causé par
+la dépendance du programme sur la communication : seul le séquençage par
+l'algorithme de Needleman-Wunsch nécessite un parallélisme
+<em>fork-join</em> afin de la matrice des scores (couplage entre les séquences).
+Quant au reste du programme, le couplage faible entre les distances
+permet d'exploiter plusieurs noeuds.
+
+<p>
+En conclusion, nos observations montrent qu'il existe un lien entre
+le temps d'exécution et la méthode de parallélisation choisie.
+Ainsi, il est préférable de choisir une architecture
+à mémoire partagée lorsqu'il existe un fort couplage entre les données
+à traiter (et donc éviter une duplication inutile et coûteuse) là
+où une architecture à mémoire distribuée est plus efficace pour
+des quantités importantes de données faiblement couplées.
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>
+Ce projet de programmation parallèle a permis d'explorer les différences
+entre les deux architectures parallèles (mémoire partagée ou distribuée)
+et de comprendre leurs avantages et inconvénients selon le couplage des
+données utilisées, notamment dans le cadre du séquençage et analyse d'ARN,
+où les deux situations se présentent et nécessitent un procédé
+capable d'exploiter une mémoire partagée avant de distribuer les données
+sur différents noeuds.  En général,
+il est important de maîtriser les deux méthodes afin de passer
+de l'une à l'autre aux besoins de l'application.
+
+<h2 id="references">Références</h2>
+
+<p>
+Needleman, Saul B. & Wunsch, Christian D. (1970).
+A general method applicable to the search for similarities in the amino acid sequence of two proteins.
+Dans <em>Journal of Molecular Biology. 48</em> (3), 443–53.
+
+<p>
+Dagum, L., & Menon, R. (1998).
+OpenMP: an industry standard API for shared-memory programming.
+Dans <em>IEEE computational science and engineering, 5</em>(1), 46-55.
+
+<p>
+ISO/IEC. (2011).
+ISO/IEC 14882:2011 – Information technology – Programming languages – C++.
+<em>International Organization for Standardization</em>.
+
+</main>
+
+<footer></footer>
+</html>
+
